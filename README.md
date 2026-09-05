@@ -64,7 +64,7 @@ rag_eval_suite/
 │   └── qa_templates.py
 ├── components/                  # Modular RAG Building Blocks
 │   ├── loaders.py               # Document loaders
-│   ├── splitters.py             # Text splitters
+│   ├── text_splitters.py        # Text splitters
 │   ├── embeddings.py            # Embedding models
 │   ├── vector_stores.py         # Vector databases & retrievers
 │   ├── rerankers.py             # Cross-encoder / reranking models

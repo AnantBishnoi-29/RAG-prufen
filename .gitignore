@@ -12,3 +12,6 @@ GEMINI.md
 # Virtual environments
 .venv
 .env
+
+databases/
+.deepeval/
