@@ -68,10 +68,12 @@ rag_eval_suite/
 │   ├── embeddings.py            # Embedding models
 │   ├── vector_stores.py         # Vector databases & retrievers
 │   ├── rerankers.py             # Cross-encoder / reranking models
-│   └── generator.py             # Answer generation & LLM interface
+│   ├── generator.py             # Answer generation & LLM interface
+│   └── cost_tracker.py          # Token usage & cost tracking
 ├── evals/                       # Evaluation Suite
 │   ├── datasets/                # Golden datasets (JSON)
 │   │   └── golden_dataset.json
+│   ├── results/                 # Exported JSON benchmark runs
 │   ├── scripts/                 # Dataset generation scripts
 │   │   └── generate_goldens.py
 │   ├── test_retriever.py        # Context Recall & Context Precision evals
@@ -92,10 +94,10 @@ Following the principle: **First make it work, then make it work better.**
   - Curated golden dataset (`evals/datasets/golden_dataset.json`)
   - Evaluation test suite using `deepeval` (`evals/test_rag.py`)
   - Validated Faithfulness & Answer Relevancy metrics
-- [ ] **Phase 3: Retriever Decoupling & Evaluation (Current)**
-  - Decouple loaders, splitters, embeddings, vector stores, and reranker
+- [x] **Phase 3: Retriever Decoupling & Evaluation (Completed)**
+  - Decoupled loaders, splitters, embeddings, vector stores, and reranker
   - Dedicated retriever evaluations: **Context Recall** and **Context Precision** (`evals/test_retriever.py`)
-- [ ] **Phase 4: Generator Decoupling & Evaluation**
+- [ ] **Phase 4: Generator Decoupling & Evaluation (Next)**
   - Modularize LLM providers, prompt templates (`prompts/`), temperature controls
   - Generator evaluations: Faithfulness, Answer Relevancy, Hallucination
 - [ ] **Phase 5: Dashboard & Comparison Interface**
