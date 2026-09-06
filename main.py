@@ -1,3 +1,4 @@
+from components.cost_tracker import format_cost_summary, track_cost
 from components.generator import generate_answer
 from components.retriever import create_vector_store, get_retriever, retrieve_contexts
 
@@ -23,11 +24,14 @@ def run_pipeline():
     for i, chunk in enumerate(contexts, 1):
         print(f"  [{i}] {chunk}")
 
-    # 4. Generate answer
+    # 4. Generate answer with cost tracking
     print("\nGenerating answer with OpenAI...")
-    answer = generate_answer(query=query, contexts=contexts)
+    with track_cost() as cost:
+        answer = generate_answer(query=query, contexts=contexts)
+
     print("\nResult:")
     print(answer)
+    print(f"\n[Usage] {format_cost_summary(cost)}")
 
 
 if __name__ == "__main__":
