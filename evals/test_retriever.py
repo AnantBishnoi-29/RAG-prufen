@@ -2,6 +2,11 @@ import json
 import sys
 from pathlib import Path
 
+# Ensure UTF-8 output encoding for Windows consoles
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # Ensure project root is in sys.path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
