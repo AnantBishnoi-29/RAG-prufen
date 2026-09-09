@@ -1,0 +1,736 @@
+/**
+ * RAG Eval Suite - Pure Vanilla JavaScript Frontend
+ * No dependencies, no build tools, standard ES6+.
+ */
+
+document.addEventListener("DOMContentLoaded", () => {
+  // --- Element Selectors ---
+  const navButtons = document.querySelectorAll(".nav-btn");
+  const tabPanes = document.querySelectorAll(".tab-pane");
+  const pageTitle = document.getElementById("page-title");
+  const pageSubtitle = document.getElementById("page-subtitle");
+
+  // Playground Elements
+  const playDocSelect = document.getElementById("play-doc");
+  const playStoreSelect = document.getElementById("play-store");
+  const playTopkRange = document.getElementById("play-topk");
+  const playTopkVal = document.getElementById("topk-val");
+  const playProviderSelect = document.getElementById("play-provider");
+  const playModelInput = document.getElementById("play-model");
+  const playPromptSelect = document.getElementById("play-prompt");
+  const playRerankCheck = document.getElementById("play-rerank");
+  const playQueryText = document.getElementById("play-query");
+  const btnRunQuery = document.getElementById("btn-run-query");
+  const btnQueryText = document.getElementById("btn-query-text");
+  const btnQuerySpinner = document.getElementById("btn-query-spinner");
+  const playAnswerBox = document.getElementById("play-answer");
+  const playChunksBox = document.getElementById("play-chunks");
+  const chunkCountSpan = document.getElementById("chunk-count");
+  const playTimingBox = document.getElementById("play-timing");
+  const timeTotal = document.getElementById("time-total");
+  const timeRetrieval = document.getElementById("time-retrieval");
+  const timeGeneration = document.getElementById("time-generation");
+
+  // Benchmark Runs Elements
+  const selectRun = document.getElementById("select-run");
+  const btnRefreshRuns = document.getElementById("btn-refresh-runs");
+  const runMetaStrip = document.getElementById("run-metadata-strip");
+  const metricsGrid = document.getElementById("metrics-summary-grid");
+  const opsStatsSection = document.getElementById("ops-stats-section");
+  const opsStatsGrid = document.getElementById("ops-stats-grid");
+  const testCasesBody = document.getElementById("test-cases-body");
+  const casesCountSpan = document.getElementById("cases-count");
+
+  // Compare Elements
+  const compareRunA = document.getElementById("compare-run-a");
+  const compareRunB = document.getElementById("compare-run-b");
+  const btnDoCompare = document.getElementById("btn-do-compare");
+  const compareContainer = document.getElementById("compare-results-container");
+  const comparisonBody = document.getElementById("comparison-body");
+
+  // Golden Datasets Elements
+  const genDocSelect = document.getElementById("gen-doc");
+  const genInstructionText = document.getElementById("gen-instruction");
+  const genCountRange = document.getElementById("gen-count");
+  const genCountVal = document.getElementById("gen-count-val");
+  const genStrategySelect = document.getElementById("gen-strategy");
+  const genOutfileInput = document.getElementById("gen-outfile");
+  const btnGenerateGoldens = document.getElementById("btn-generate-goldens");
+  const btnGenText = document.getElementById("btn-gen-text");
+  const btnGenSpinner = document.getElementById("btn-gen-spinner");
+  const genStatusMsg = document.getElementById("gen-status-msg");
+  const selectDataset = document.getElementById("select-dataset");
+  const btnRefreshDatasets = document.getElementById("btn-refresh-datasets");
+  const datasetPreview = document.getElementById("dataset-preview");
+  const datasetCountSpan = document.getElementById("dataset-items-count");
+
+  // Modal Elements
+  const modal = document.getElementById("detail-modal");
+  const modalTitle = document.getElementById("modal-title");
+  const modalBody = document.getElementById("modal-body");
+  const btnCloseModal = document.getElementById("btn-close-modal");
+
+  // In-memory cache
+  let currentRunData = null;
+
+  // --- Tab Titles & Descriptions ---
+  const tabInfo = {
+    playground: {
+      title: "Live RAG Playground",
+      subtitle: "Interactively query your document corpus, inspect retrieved chunks, and test generator prompts live."
+    },
+    benchmarks: {
+      title: "Benchmark Results Viewer",
+      subtitle: "Inspect quantitative evaluation scores, operational metrics, and per-case breakdowns."
+    },
+    compare: {
+      title: "Side-by-Side Configuration Comparison",
+      subtitle: "Compare retrieval, latency, and generation quality differences across two evaluation runs."
+    },
+    goldens: {
+      title: "Golden Datasets & Synthesis",
+      subtitle: "Review ground-truth QA datasets or synthesize new golden test cases with custom prompt styling."
+    }
+  };
+
+  // --- Navigation Handling ---
+  navButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tabKey = btn.getAttribute("data-tab");
+      navButtons.forEach(b => b.classList.remove("active"));
+      tabPanes.forEach(p => p.classList.remove("active"));
+
+      btn.classList.add("active");
+      const targetPane = document.getElementById(`tab-${tabKey}`);
+      if (targetPane) targetPane.classList.add("active");
+
+      if (tabInfo[tabKey]) {
+        pageTitle.textContent = tabInfo[tabKey].title;
+        pageSubtitle.textContent = tabInfo[tabKey].subtitle;
+      }
+    });
+  });
+
+  // Range sliders
+  playTopkRange.addEventListener("input", (e) => {
+    playTopkVal.textContent = e.target.value;
+  });
+
+  genCountRange.addEventListener("input", (e) => {
+    genCountVal.textContent = e.target.value;
+  });
+
+  // Modal close
+  btnCloseModal.addEventListener("click", () => {
+    modal.classList.add("hidden");
+  });
+  window.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  });
+
+  // =========================================================================
+  // 1. Initial Data Fetching
+  // =========================================================================
+  async function loadDocuments() {
+    try {
+      const res = await fetch("/api/documents");
+      const docs = await res.json();
+      playDocSelect.innerHTML = "";
+      genDocSelect.innerHTML = "";
+
+      docs.forEach(doc => {
+        const opt1 = document.createElement("option");
+        opt1.value = doc.path;
+        opt1.textContent = doc.name;
+        playDocSelect.appendChild(opt1);
+
+        const opt2 = document.createElement("option");
+        opt2.value = doc.path;
+        opt2.textContent = doc.name;
+        genDocSelect.appendChild(opt2);
+      });
+    } catch (err) {
+      console.error("Failed to load documents:", err);
+    }
+  }
+
+  async function loadRuns() {
+    try {
+      const res = await fetch("/api/results");
+      const runs = await res.json();
+
+      selectRun.innerHTML = "";
+      compareRunA.innerHTML = "";
+      compareRunB.innerHTML = "";
+
+      if (runs.length === 0) {
+        selectRun.innerHTML = "<option value=''>No runs found</option>";
+        return;
+      }
+
+      runs.forEach((run, idx) => {
+        const optText = `${run.filename} (${run.type} - ${run.date})`;
+        const opt1 = new Option(optText, run.filename);
+        const optA = new Option(optText, run.filename);
+        const optB = new Option(optText, run.filename);
+
+        selectRun.appendChild(opt1);
+        compareRunA.appendChild(optA);
+        compareRunB.appendChild(optB);
+      });
+
+      if (runs.length > 1) {
+        compareRunB.selectedIndex = 1;
+      }
+
+      // Automatically load the latest run
+      if (runs.length > 0) {
+        loadRunDetail(runs[0].filename);
+      }
+    } catch (err) {
+      console.error("Failed to load runs:", err);
+    }
+  }
+
+  async function loadDatasets() {
+    try {
+      const res = await fetch("/api/datasets");
+      const datasets = await res.json();
+      selectDataset.innerHTML = "";
+
+      if (datasets.length === 0) {
+        selectDataset.innerHTML = "<option value=''>No datasets found</option>";
+        return;
+      }
+
+      datasets.forEach(ds => {
+        const opt = new Option(`${ds.filename} (${ds.count} pairs)`, ds.filename);
+        selectDataset.appendChild(opt);
+      });
+
+      if (datasets.length > 0) {
+        loadDatasetDetail(datasets[0].filename);
+      }
+    } catch (err) {
+      console.error("Failed to load datasets:", err);
+    }
+  }
+
+  // =========================================================================
+  // 2. Playground: Live Query
+  // =========================================================================
+  btnRunQuery.addEventListener("click", async () => {
+    const query = playQueryText.value.trim();
+    if (!query) {
+      alert("Please enter a question or query.");
+      return;
+    }
+
+    // Set loading state
+    btnRunQuery.disabled = true;
+    btnQueryText.textContent = "Executing RAG...";
+    btnQuerySpinner.classList.remove("hidden");
+    playAnswerBox.className = "answer-content empty";
+    playAnswerBox.textContent = "Retrieving context and generating response...";
+    playChunksBox.innerHTML = "<div class='placeholder-text'>Fetching chunks...</div>";
+    playTimingBox.classList.add("hidden");
+
+    const payload = {
+      query: query,
+      doc_path: playDocSelect.value,
+      vector_store: playStoreSelect.value,
+      top_k: parseInt(playTopkRange.value, 10),
+      provider: playProviderSelect.value,
+      model_name: playModelInput.value.trim() || "gpt-4o-mini",
+      prompt_template: playPromptSelect.value,
+      use_reranker: playRerankCheck.checked
+    };
+
+    try {
+      const res = await fetch("/api/playground/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Query execution failed");
+      }
+
+      const data = await res.json();
+
+      // Update Answer
+      playAnswerBox.className = "answer-content";
+      playAnswerBox.textContent = data.answer || "No response generated.";
+
+      // Update Timings
+      timeTotal.textContent = `${data.total_latency_ms.toFixed(1)}ms`;
+      timeRetrieval.textContent = `${data.retrieval_latency_ms.toFixed(1)}ms`;
+      timeGeneration.textContent = `${data.generation_latency_ms.toFixed(1)}ms`;
+      playTimingBox.classList.remove("hidden");
+
+      // Update Chunks
+      chunkCountSpan.textContent = data.chunks ? data.chunks.length : 0;
+      if (data.chunks && data.chunks.length > 0) {
+        playChunksBox.innerHTML = "";
+        data.chunks.forEach((chunk, i) => {
+          const card = document.createElement("div");
+          card.className = "chunk-card";
+          const pageStr = chunk.page !== null && chunk.page !== undefined ? `Page ${chunk.page + 1}` : "Page N/A";
+          card.innerHTML = `
+            <div class="chunk-header">
+              <span>Chunk #${i + 1} (${chunk.chars} chars)</span>
+              <span>${pageStr}</span>
+            </div>
+            <div class="chunk-body">${escapeHtml(chunk.content)}</div>
+          `;
+          playChunksBox.appendChild(card);
+        });
+      } else {
+        playChunksBox.innerHTML = "<div class='placeholder-text'>No chunks returned.</div>";
+      }
+
+    } catch (err) {
+      playAnswerBox.className = "answer-content empty";
+      playAnswerBox.textContent = `❌ Error: ${err.message}`;
+    } finally {
+      btnRunQuery.disabled = false;
+      btnQueryText.textContent = "⚡ Execute Pipeline";
+      btnQuerySpinner.classList.add("hidden");
+    }
+  });
+
+  // =========================================================================
+  // 3. Benchmark Runs Detail Viewer
+  // =========================================================================
+  selectRun.addEventListener("change", (e) => {
+    if (e.target.value) loadRunDetail(e.target.value);
+  });
+
+  btnRefreshRuns.addEventListener("click", () => {
+    loadRuns();
+  });
+
+  async function loadRunDetail(filename) {
+    try {
+      const res = await fetch(`/api/results/${encodeURIComponent(filename)}`);
+      if (!res.ok) throw new Error("Failed to load run data");
+      const data = await res.json();
+      currentRunData = data;
+
+      renderRunMetadata(data);
+      renderMetricsSummary(data);
+      renderTestCasesTable(data);
+    } catch (err) {
+      console.error("Error loading run detail:", err);
+    }
+  }
+
+  function renderRunMetadata(data) {
+    runMetaStrip.innerHTML = "";
+    runMetaStrip.classList.remove("hidden");
+
+    const hp = data.hyperparameters || {};
+    const pills = [
+      `Type: <strong>${hp.eval_type || "N/A"}</strong>`,
+      `Store: <strong>${hp.vector_store || "N/A"}</strong>`,
+      `Model: <strong>${hp.model_name || "N/A"}</strong>`,
+      `Reranker: <strong>${hp.use_reranker ? "Enabled" : "Disabled"}</strong>`,
+      `Top-K: <strong>${hp.top_k || "N/A"}</strong>`,
+      `Duration: <strong>${data.runDuration ? data.runDuration.toFixed(2) + "s" : "N/A"}</strong>`,
+      `Cost: <strong>$${data.evaluationCost ? data.evaluationCost.toFixed(5) : "0.00"}</strong>`
+    ];
+
+    pills.forEach(p => {
+      const span = document.createElement("div");
+      span.className = "meta-pill";
+      span.innerHTML = p;
+      runMetaStrip.appendChild(span);
+    });
+  }
+
+  function renderMetricsSummary(data) {
+    metricsGrid.innerHTML = "";
+    opsStatsSection.classList.add("hidden");
+
+    // Standard DeepEval metricsScores
+    if (data.metricsScores && data.metricsScores.length > 0) {
+      data.metricsScores.forEach(m => {
+        const avg = m.scores && m.scores.length > 0
+          ? (m.scores.reduce((a, b) => a + b, 0) / m.scores.length).toFixed(2)
+          : "N/A";
+
+        const passRate = (m.passes + m.fails) > 0
+          ? ((m.passes / (m.passes + m.fails)) * 100).toFixed(0) + "%"
+          : "N/A";
+
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        const isPassed = m.fails === 0;
+        card.innerHTML = `
+          <div class="metric-title">${m.metric}</div>
+          <div class="metric-value" style="color: ${avg >= 0.7 ? '#3fb950' : '#f85149'}">${avg}</div>
+          <span class="metric-badge ${isPassed ? 'badge-pass' : 'badge-fail'}">
+            ${isPassed ? 'PASS' : 'FAIL'} (${passRate} pass rate)
+          </span>
+        `;
+        metricsGrid.appendChild(card);
+      });
+    }
+
+    // Operational Latency & Ops Run Data
+    if (data.latency_metrics) {
+      opsStatsSection.classList.remove("hidden");
+      opsStatsGrid.innerHTML = "";
+
+      const lat = data.latency_metrics;
+      const tok = data.token_metrics || {};
+      const cost = data.cost_metrics || {};
+
+      const opsCards = [
+        { title: "P50 Latency", val: `${lat.total_latency_ms?.p50?.toFixed(1) || 0}ms`, badge: "Median" },
+        { title: "P95 Latency", val: `${lat.total_latency_ms?.p95?.toFixed(1) || 0}ms`, badge: "Tail Latency" },
+        { title: "Throughput", val: `${tok.avg_throughput_tokens_per_sec?.toFixed(1) || 0} t/s`, badge: "Tokens/sec" },
+        { title: "Cost per 1k", val: `$${cost.projected_cost_per_1k_queries_usd?.toFixed(4) || 0}`, badge: "Projected" }
+      ];
+
+      opsCards.forEach(c => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `
+          <div class="metric-title">${c.title}</div>
+          <div class="metric-value">${c.val}</div>
+          <span class="metric-badge badge-info">${c.badge}</span>
+        `;
+        opsStatsGrid.appendChild(card);
+      });
+    }
+  }
+
+  function renderTestCasesTable(data) {
+    testCasesBody.innerHTML = "";
+    const cases = data.testCases || data.per_query_results || [];
+    casesCountSpan.textContent = cases.length;
+
+    if (cases.length === 0) {
+      testCasesBody.innerHTML = "<tr><td colspan='5' class='placeholder-text'>No test cases recorded in this run.</td></tr>";
+      return;
+    }
+
+    cases.forEach((tc, idx) => {
+      const tr = document.createElement("tr");
+      const inputQuery = tc.input || tc.query || "N/A";
+      const isSuccess = tc.success !== undefined ? tc.success : (tc.flaky === false);
+
+      let scoresHtml = "";
+      if (tc.metricsData) {
+        scoresHtml = tc.metricsData.map(m => {
+          const color = m.score >= (m.threshold || 0.7) ? "#3fb950" : "#f85149";
+          return `<span style="font-size: 11px; margin-right: 6px; color: ${color}; font-weight: 600;">${m.name}: ${m.score.toFixed(2)}</span>`;
+        }).join("");
+      } else if (tc.total_ms) {
+        scoresHtml = `<span style="font-size: 11px; color: #58a6ff;">Total: ${tc.total_ms.toFixed(1)}ms | Ret: ${tc.retrieval_ms?.toFixed(1)}ms</span>`;
+      }
+
+      tr.innerHTML = `
+        <td>${idx + 1}</td>
+        <td style="max-width: 400px; font-weight: 500;">${escapeHtml(inputQuery.slice(0, 120))}${inputQuery.length > 120 ? '...' : ''}</td>
+        <td>
+          <span class="metric-badge ${isSuccess ? 'badge-pass' : 'badge-fail'}">
+            ${isSuccess ? 'PASSED' : 'FAILED'}
+          </span>
+        </td>
+        <td>${scoresHtml || "N/A"}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm btn-view-case" data-index="${idx}" style="padding: 4px 8px; font-size: 11px;">View</button>
+        </td>
+      `;
+      testCasesBody.appendChild(tr);
+    });
+
+    // Attach View click handler
+    document.querySelectorAll(".btn-view-case").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.getAttribute("data-index"), 10);
+        openCaseModal(cases[index]);
+      });
+    });
+  }
+
+  function openCaseModal(tc) {
+    modalTitle.textContent = `Test Case Detail: ${tc.name || "Query #" + (tc.query_index || 1)}`;
+    const query = tc.input || tc.query || "N/A";
+    const actual = tc.actualOutput || "N/A";
+    const expected = tc.expectedOutput || "N/A";
+
+    let contextHtml = "";
+    const ctxList = tc.retrievalContext || tc.retrieval_context || tc.context || [];
+    if (ctxList.length > 0) {
+      contextHtml = ctxList.map((c, i) => `
+        <div class="chunk-card" style="margin-bottom: 8px;">
+          <div class="chunk-header"><span>Context #${i + 1}</span></div>
+          <div class="chunk-body">${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</div>
+        </div>
+      `).join("");
+    } else {
+      contextHtml = "<div class='placeholder-text'>No context chunks available.</div>";
+    }
+
+    let metricsHtml = "";
+    if (tc.metricsData) {
+      metricsHtml = `
+        <h4 style="margin: 16px 0 8px; font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Metrics Breakdown</h4>
+        <div class="cards-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom: 16px;">
+          ${tc.metricsData.map(m => `
+            <div class="metric-card" style="padding: 10px;">
+              <div class="metric-title">${m.name}</div>
+              <div class="metric-value" style="font-size: 20px; color: ${m.score >= m.threshold ? '#3fb950' : '#f85149'}">${m.score.toFixed(2)}</div>
+              <span class="metric-badge ${m.success ? 'badge-pass' : 'badge-fail'}">${m.success ? 'PASS' : 'FAIL'}</span>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    modalBody.innerHTML = `
+      <div style="margin-bottom: 14px;">
+        <strong style="color: var(--text-muted); font-size: 12px; text-transform: uppercase;">User Input:</strong>
+        <div style="margin-top: 4px; font-size: 14px; font-weight: 500;">${escapeHtml(query)}</div>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <strong style="color: var(--text-muted); font-size: 12px; text-transform: uppercase;">Generated Output:</strong>
+        <div class="result-box" style="margin-top: 4px; padding: 12px;">${escapeHtml(actual)}</div>
+      </div>
+
+      ${expected !== "N/A" ? `
+      <div style="margin-bottom: 14px;">
+        <strong style="color: var(--text-muted); font-size: 12px; text-transform: uppercase;">Expected Ground Truth Output:</strong>
+        <div style="margin-top: 4px; font-size: 13px; color: var(--text-muted);">${escapeHtml(expected)}</div>
+      </div>` : ''}
+
+      ${metricsHtml}
+
+      <div>
+        <strong style="color: var(--text-muted); font-size: 12px; text-transform: uppercase;">Retrieved Chunks:</strong>
+        <div style="margin-top: 8px;">${contextHtml}</div>
+      </div>
+    `;
+
+    modal.classList.remove("hidden");
+  }
+
+  // =========================================================================
+  // 4. Compare Runs
+  // =========================================================================
+  btnDoCompare.addEventListener("click", async () => {
+    const fileA = compareRunA.value;
+    const fileB = compareRunB.value;
+
+    if (!fileA || !fileB) {
+      alert("Please select both runs to compare.");
+      return;
+    }
+    if (fileA === fileB) {
+      alert("Please select two different runs for comparison.");
+      return;
+    }
+
+    btnDoCompare.disabled = true;
+    btnDoCompare.textContent = "Comparing...";
+
+    try {
+      const [resA, resB] = await Promise.all([
+        fetch(`/api/results/${encodeURIComponent(fileA)}`).then(r => r.json()),
+        fetch(`/api/results/${encodeURIComponent(fileB)}`).then(r => r.json())
+      ]);
+
+      renderComparison(resA, resB, fileA, fileB);
+    } catch (err) {
+      alert("Failed to compare runs: " + err.message);
+    } finally {
+      btnDoCompare.disabled = false;
+      btnDoCompare.textContent = "⚖️ Compare";
+    }
+  });
+
+  function renderComparison(runA, runB, nameA, nameB) {
+    compareContainer.classList.remove("hidden");
+    comparisonBody.innerHTML = "";
+
+    const hpA = runA.hyperparameters || {};
+    const hpB = runB.hyperparameters || {};
+
+    // Hyperparameters rows
+    const hpKeys = ["eval_type", "vector_store", "model_name", "use_reranker", "top_k", "chunk_size", "prompt_template"];
+    hpKeys.forEach(k => {
+      const vA = hpA[k] !== undefined ? String(hpA[k]) : "N/A";
+      const vB = hpB[k] !== undefined ? String(hpB[k]) : "N/A";
+      const diff = vA === vB ? "<span style='color: var(--text-dim)'>Identical</span>" : "<strong style='color: #58a6ff'>Changed</strong>";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>Config: ${k}</strong></td>
+        <td>${vA}</td>
+        <td>${vB}</td>
+        <td>${diff}</td>
+      `;
+      comparisonBody.appendChild(tr);
+    });
+
+    // Metrics Comparison
+    const getMetricMap = (run) => {
+      const map = {};
+      if (run.metricsScores) {
+        run.metricsScores.forEach(m => {
+          const avg = m.scores && m.scores.length > 0 ? (m.scores.reduce((a, b) => a + b, 0) / m.scores.length) : 0;
+          map[m.metric] = avg;
+        });
+      }
+      return map;
+    };
+
+    const mapA = getMetricMap(runA);
+    const mapB = getMetricMap(runB);
+    const allMetrics = Array.from(new Set([...Object.keys(mapA), ...Object.keys(mapB)]));
+
+    allMetrics.forEach(metric => {
+      const scoreA = mapA[metric] !== undefined ? mapA[metric] : null;
+      const scoreB = mapB[metric] !== undefined ? mapB[metric] : null;
+
+      let deltaStr = "N/A";
+      if (scoreA !== null && scoreB !== null) {
+        const delta = scoreB - scoreA;
+        const color = delta > 0 ? "#3fb950" : (delta < 0 ? "#f85149" : "var(--text-dim)");
+        const sign = delta > 0 ? "+" : "";
+        deltaStr = `<span style="color: ${color}; font-weight: 700;">${sign}${(delta * 100).toFixed(1)}%</span>`;
+      }
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>Metric: ${metric}</strong></td>
+        <td>${scoreA !== null ? scoreA.toFixed(2) : "N/A"}</td>
+        <td>${scoreB !== null ? scoreB.toFixed(2) : "N/A"}</td>
+        <td>${deltaStr}</td>
+      `;
+      comparisonBody.appendChild(tr);
+    });
+
+    // Duration / Cost comparison
+    const durA = runA.runDuration ? runA.runDuration.toFixed(2) + "s" : "N/A";
+    const durB = runB.runDuration ? runB.runDuration.toFixed(2) + "s" : "N/A";
+    const trDur = document.createElement("tr");
+    trDur.innerHTML = `
+      <td><strong>Total Run Duration</strong></td>
+      <td>${durA}</td>
+      <td>${durB}</td>
+      <td>-</td>
+    `;
+    comparisonBody.appendChild(trDur);
+  }
+
+  // =========================================================================
+  // 5. Golden Datasets & Generator
+  // =========================================================================
+  selectDataset.addEventListener("change", (e) => {
+    if (e.target.value) loadDatasetDetail(e.target.value);
+  });
+
+  btnRefreshDatasets.addEventListener("click", () => {
+    loadDatasets();
+  });
+
+  async function loadDatasetDetail(filename) {
+    try {
+      const res = await fetch(`/api/datasets/${encodeURIComponent(filename)}`);
+      const items = await res.json();
+      datasetCountSpan.textContent = items.length;
+      datasetPreview.innerHTML = "";
+
+      if (items.length === 0) {
+        datasetPreview.innerHTML = "<div class='placeholder-text'>Dataset is empty.</div>";
+        return;
+      }
+
+      items.forEach((item, idx) => {
+        const card = document.createElement("div");
+        card.className = "qa-card";
+        const metaStr = item.metadata?.user_instruction ? `Instruction: ${item.metadata.user_instruction}` : (item.source_file || "Golden QA");
+        card.innerHTML = `
+          <div class="qa-q">Q${idx + 1}: ${escapeHtml(item.input)}</div>
+          <div class="qa-a"><strong>Answer:</strong> ${escapeHtml(item.expected_output || "N/A")}</div>
+          <div class="qa-meta"><span>📁 ${escapeHtml(metaStr)}</span></div>
+        `;
+        datasetPreview.appendChild(card);
+      });
+    } catch (err) {
+      console.error("Failed to load dataset detail:", err);
+    }
+  }
+
+  // Generate Goldens Handler
+  btnGenerateGoldens.addEventListener("click", async () => {
+    const docPath = genDocSelect.value;
+    const instruction = genInstructionText.value.trim();
+    const count = parseInt(genCountRange.value, 10);
+    const strategy = genStrategySelect.value;
+    const outfile = genOutfileInput.value.trim() || "custom_goldens.json";
+
+    btnGenerateGoldens.disabled = true;
+    btnGenText.textContent = "Synthesizing Dataset...";
+    btnGenSpinner.classList.remove("hidden");
+    genStatusMsg.className = "status-banner hidden";
+
+    const payload = {
+      doc_path: docPath,
+      instruction: instruction || "Generate clear, representative questions and answers.",
+      max_goldens: count,
+      sample_strategy: strategy,
+      output_file: outfile
+    };
+
+    try {
+      const res = await fetch("/api/goldens/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Synthesis failed");
+
+      genStatusMsg.className = "status-banner success";
+      genStatusMsg.textContent = `🎉 Generated ${data.count} golden QA pairs successfully to ${data.file}!`;
+      genStatusMsg.classList.remove("hidden");
+
+      // Refresh datasets list
+      await loadDatasets();
+    } catch (err) {
+      genStatusMsg.className = "status-banner error";
+      genStatusMsg.textContent = `❌ ${err.message}`;
+      genStatusMsg.classList.remove("hidden");
+    } finally {
+      btnGenerateGoldens.disabled = false;
+      btnGenText.textContent = "🚀 Synthesize Dataset";
+      btnGenSpinner.classList.add("hidden");
+    }
+  });
+
+  // Utility to escape HTML
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // Initial Load
+  loadDocuments();
+  loadRuns();
+  loadDatasets();
+});
+

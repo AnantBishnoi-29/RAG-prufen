@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Evaluation Suite - Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="logo-section">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <h2>RAG Eval Suite</h2>
+          <span class="version-tag">v0.5.0</span>
+        </div>
+      </div>
+
+      <nav class="nav-links">
+        <button class="nav-btn active" data-tab="playground">
+          <span class="icon">🧪</span> Live Playground
+        </button>
+        <button class="nav-btn" data-tab="benchmarks">
+          <span class="icon">📊</span> Benchmark Runs
+        </button>
+        <button class="nav-btn" data-tab="compare">
+          <span class="icon">⚖️</span> Compare Runs
+        </button>
+        <button class="nav-btn" data-tab="goldens">
+          <span class="icon">📁</span> Golden Datasets
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-status">
+          <span class="status-dot"></span> Backend: <span id="backend-status">Connected</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Header Bar -->
+      <header class="top-bar">
+        <div>
+          <h1 id="page-title">Live RAG Playground</h1>
+          <p id="page-subtitle" class="subtitle">Interactively query your document corpus, inspect retrieved chunks, and test generator prompts live.</p>
+        </div>
+      </header>
+
+      <!-- TAB 1: Live Playground -->
+      <section id="tab-playground" class="tab-pane active">
+        <div class="playground-grid">
+          <!-- Left: Configuration & Input -->
+          <div class="panel config-panel">
+            <h3 class="panel-header">Pipeline Configuration</h3>
+
+            <div class="form-group">
+              <label for="play-doc">Source Document</label>
+              <select id="play-doc" class="input-select"></select>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="play-store">Vector Store</label>
+                <select id="play-store" class="input-select">
+                  <option value="chroma" selected>Chroma DB</option>
+                  <option value="faiss">FAISS</option>
+                  <option value="qdrant">Qdrant</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="play-topk">Top-K Chunks (<span id="topk-val">3</span>)</label>
+                <input type="range" id="play-topk" min="1" max="10" value="3" class="input-range" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="play-provider">LLM Provider</label>
+                <select id="play-provider" class="input-select">
+                  <option value="openai" selected>OpenAI</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="ollama">Ollama (Local)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="play-model">Model</label>
+                <input type="text" id="play-model" class="input-text" value="gpt-4o-mini" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="play-prompt">Prompt Template</label>
+                <select id="play-prompt" class="input-select">
+                  <option value="default" selected>Default Grounded</option>
+                  <option value="concise">Concise & Direct</option>
+                  <option value="reasoning">Step-by-Step Reasoning</option>
+                </select>
+              </div>
+
+              <div class="form-group checkbox-group">
+                <label class="switch-label">
+                  <input type="checkbox" id="play-rerank" />
+                  <span class="switch-text">Enable Reranker (Cross-Encoder)</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group query-section">
+              <label for="play-query">User Question / Query</label>
+              <textarea id="play-query" class="input-textarea" rows="4" placeholder="Ask a question about the document... (e.g. How does Meta report human rights issues to the board?)"></textarea>
+            </div>
+
+            <button id="btn-run-query" class="btn btn-primary">
+              <span id="btn-query-text">⚡ Execute Pipeline</span>
+              <span id="btn-query-spinner" class="spinner hidden"></span>
+            </button>
+          </div>
+
+          <!-- Right: Output & Chunks -->
+          <div class="panel output-panel">
+            <h3 class="panel-header">Pipeline Response</h3>
+
+            <div id="play-timing" class="timing-badge hidden">
+              <span>⏱️ Total: <strong id="time-total">0ms</strong></span>
+              <span>🔍 Retrieval: <strong id="time-retrieval">0ms</strong></span>
+              <span>🤖 Generation: <strong id="time-generation">0ms</strong></span>
+            </div>
+
+            <div class="result-box">
+              <h4>Generated Answer</h4>
+              <div id="play-answer" class="answer-content empty">Submit a question to see the live RAG response.</div>
+            </div>
+
+            <div class="chunks-section">
+              <h4>Retrieved Context Chunks (<span id="chunk-count">0</span>)</h4>
+              <div id="play-chunks" class="chunks-list">
+                <div class="placeholder-text">No chunks retrieved yet.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: Benchmark Runs -->
+      <section id="tab-benchmarks" class="tab-pane">
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <label for="select-run">Select Benchmark Run:</label>
+            <select id="select-run" class="input-select"></select>
+          </div>
+          <button id="btn-refresh-runs" class="btn btn-secondary">🔄 Refresh</button>
+        </div>
+
+        <div id="run-metadata-strip" class="metadata-strip hidden"></div>
+
+        <!-- Metric Cards Grid -->
+        <div id="metrics-summary-grid" class="cards-grid"></div>
+
+        <!-- Latency / Ops Stats (if ops run) -->
+        <div id="ops-stats-section" class="panel hidden">
+          <h3 class="panel-header">Latency & Operational Efficiency</h3>
+          <div id="ops-stats-grid" class="cards-grid"></div>
+        </div>
+
+        <!-- Test Cases Detail Table -->
+        <div class="panel table-panel">
+          <h3 class="panel-header">Individual Test Cases (<span id="cases-count">0</span>)</h3>
+          <div class="table-wrapper">
+            <table class="data-table" id="table-test-cases">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">#</th>
+                  <th>Input Query</th>
+                  <th>Status</th>
+                  <th>Scores</th>
+                  <th style="width: 80px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="test-cases-body">
+                <tr><td colspan="5" class="placeholder-text">Select a benchmark run above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Compare Runs -->
+      <section id="tab-compare" class="tab-pane">
+        <div class="toolbar compare-toolbar">
+          <div class="form-group">
+            <label for="compare-run-a">Baseline Run (A):</label>
+            <select id="compare-run-a" class="input-select"></select>
+          </div>
+          <div class="compare-vs">VS</div>
+          <div class="form-group">
+            <label for="compare-run-b">Candidate Run (B):</label>
+            <select id="compare-run-b" class="input-select"></select>
+          </div>
+          <button id="btn-do-compare" class="btn btn-primary">⚖️ Compare</button>
+        </div>
+
+        <div id="compare-results-container" class="panel hidden">
+          <h3 class="panel-header">Configuration & Metric Delta</h3>
+          <div class="table-wrapper">
+            <table class="data-table" id="table-comparison">
+              <thead>
+                <tr>
+                  <th>Dimension</th>
+                  <th>Baseline (Run A)</th>
+                  <th>Candidate (Run B)</th>
+                  <th>Difference / Impact</th>
+                </tr>
+              </thead>
+              <tbody id="comparison-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: Golden Datasets & Generator -->
+      <section id="tab-goldens" class="tab-pane">
+        <div class="playground-grid">
+          <!-- Left: Generator Form -->
+          <div class="panel">
+            <h3 class="panel-header">Generate Golden Dataset</h3>
+            <p class="subtitle">Extract ground-truth QA pairs across large documents using custom instructions.</p>
+
+            <div class="form-group">
+              <label for="gen-doc">Source Document</label>
+              <select id="gen-doc" class="input-select"></select>
+            </div>
+
+            <div class="form-group">
+              <label for="gen-instruction">Custom User Instruction / Persona</label>
+              <textarea id="gen-instruction" class="input-textarea" rows="3" placeholder="e.g. Act as a strict academic examiner testing precise definitions and prerequisites."></textarea>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="gen-count">Total Goldens (<span id="gen-count-val">5</span>)</label>
+                <input type="range" id="gen-count" min="1" max="20" value="5" class="input-range" />
+              </div>
+
+              <div class="form-group">
+                <label for="gen-strategy">Sampling Strategy</label>
+                <select id="gen-strategy" class="input-select">
+                  <option value="stride" selected>Uniform Stride (Full Doc Span)</option>
+                  <option value="head_tail">Head & Tail</option>
+                  <option value="all">Sequential First N</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="gen-outfile">Output Filename (.json)</label>
+              <input type="text" id="gen-outfile" class="input-text" value="custom_goldens.json" />
+            </div>
+
+            <button id="btn-generate-goldens" class="btn btn-primary">
+              <span id="btn-gen-text">🚀 Synthesize Dataset</span>
+              <span id="btn-gen-spinner" class="spinner hidden"></span>
+            </button>
+            <div id="gen-status-msg" class="status-banner hidden"></div>
+          </div>
+
+          <!-- Right: Existing Datasets Viewer -->
+          <div class="panel">
+            <div class="toolbar" style="margin-bottom: 12px; padding: 0;">
+              <div class="form-group" style="margin: 0; flex: 1;">
+                <label for="select-dataset">Existing Dataset:</label>
+                <select id="select-dataset" class="input-select"></select>
+              </div>
+              <button id="btn-refresh-datasets" class="btn btn-secondary">🔄 Refresh</button>
+            </div>
+
+            <h4 style="margin-top: 10px; margin-bottom: 8px;">QA Pairs (<span id="dataset-items-count">0</span>)</h4>
+            <div id="dataset-preview" class="dataset-preview-list">
+              <div class="placeholder-text">Select a dataset above to preview QA pairs.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal for test case full view -->
+  <div id="detail-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title">Test Case Details</h3>
+        <button id="btn-close-modal" class="modal-close">&times;</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
