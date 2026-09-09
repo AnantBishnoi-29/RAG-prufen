@@ -25,6 +25,8 @@ dependencies = [
     "pypdf>=6.16.2",
     "faiss-cpu>=1.15.0",
     "langchain-qdrant>=1.1.0",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.4",
 ]
 [[tool.uv.index]]
 name = "pytorch"

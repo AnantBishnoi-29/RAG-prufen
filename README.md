@@ -73,11 +73,21 @@ rag_eval_suite/
 ├── evals/                       # Evaluation Suite
 │   ├── datasets/                # Golden datasets (JSON)
 │   │   └── golden_dataset.json
+│   ├── datasets/                # Golden & Safety datasets (JSON)
+│   │   ├── golden_dataset.json
+│   │   └── safety_dataset.json
 │   ├── results/                 # Exported JSON benchmark runs
 │   ├── scripts/                 # Dataset generation scripts
 │   │   └── generate_goldens.py
-│   ├── test_retriever.py        # Context Recall & Context Precision evals
+│   ├── test_generator.py        # Dedicated Faithfulness, Relevancy & Hallucination evals
+│   ├── test_retriever.py        # Dedicated Context Recall & Context Precision evals
 │   └── test_rag.py              # End-to-end Faithfulness & Relevancy evals
+│   ├── test_generator.py        # Dedicated generator isolation evals
+│   ├── test_retriever.py        # Dedicated retriever evals (Recall & Precision)
+│   ├── test_generator.py        # Dedicated generator isolation evals (Faithfulness, Relevancy, Hallucination)
+│   ├── test_safety.py           # Safety & robustness evals (Toxicity, Bias, Injections)
+│   ├── test_ops.py              # Operations & performance evals (Latency, Tokens, Cost, Throughput)
+│   └── test_rag.py              # End-to-end live RAG pipeline evals
 └── main.py                      # Pipeline entry point
 ```
 
@@ -94,11 +104,28 @@ Following the principle: **First make it work, then make it work better.**
   - Curated golden dataset (`evals/datasets/golden_dataset.json`)
   - Evaluation test suite using `deepeval` (`evals/test_rag.py`)
   - Validated Faithfulness & Answer Relevancy metrics
-- [x] **Phase 3: Retriever Decoupling & Evaluation (Completed)**
+- [x] **Phase 3: Retriever Decoupling & Evaluation**
   - Decoupled loaders, splitters, embeddings, vector stores, and reranker
   - Dedicated retriever evaluations: **Context Recall** and **Context Precision** (`evals/test_retriever.py`)
-- [ ] **Phase 4: Generator Decoupling & Evaluation (Next)**
-  - Modularize LLM providers, prompt templates (`prompts/`), temperature controls
-  - Generator evaluations: Faithfulness, Answer Relevancy, Hallucination
-- [ ] **Phase 5: Dashboard & Comparison Interface**
+- [x] **Phase 4: Generator Decoupling & Evaluation (Completed)**
+- [x] **Phase 4: Generator Decoupling & Safety Evaluation (Completed)**
+- [x] **Phase 4: Generator Decoupling, Safety & Ops Evaluation (Completed)**
+  - Decoupled LLM factory (`get_llm`) supporting OpenAI, DeepSeek, and Ollama/Local
+  - Prompt template registry (`prompts/qa_templates.py`: default, concise, reasoning)
+  - Dedicated generator evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`) supporting both isolated ground-truth context and live retrieval mode
+  - Dedicated generator isolation evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`)
+  - Prompt template registry (`prompts/qa_templates.py`, `prompts/synthesis_prompts.py`)
+  - Dedicated generator evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`)
+  - Dedicated safety & robustness evaluations: **Toxicity**, **Bias**, and **Adversarial Injections** (`evals/test_safety.py`, `evals/datasets/safety_dataset.json`)
+  - Dedicated operations & performance benchmarking: **Latency (P50/P95), Token Usage, USD Cost & Throughput** (`evals/test_ops.py`)
+  - End-to-end live RAG evaluation runner (`evals/test_rag.py`)
+  - **Production Golden Dataset Generator** (`evals/scripts/generate_goldens.py`):
+    - Direct, high-throughput LLM pipeline (no DeepEval synthesis overhead)
+    - Custom user-prompt-driven styling (supports multiple instructions/perspectives)
+    - Uniform stride sampling across large enterprise documents (e.g. 300+ page PDFs)
+    - Automatic checkpointing and resumability (`.checkpoint.json`)
+- [ ] **Phase 5: Dashboard & Comparison Interface (Next)**
   - Streamlit web interface for interactive benchmarking and side-by-side comparison.
+- [x] **Phase 5: Interactive Web Dashboard & Comparison UI (Completed)**
+  - Pure HTML5, CSS3, and Vanilla JavaScript frontend (`web/index.html`, `web/static/style.css`, `web/static/app.js`)
+  - FastAPI backend server (`app.py`) providing interactive playground, results browser, side-by-side run comparison, and dataset synthesis
