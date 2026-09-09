@@ -16,3 +16,4 @@ GEMINI.md
 databases/
 .deepeval/
 evals/results/
+evals/datasets
