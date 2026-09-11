@@ -10,7 +10,6 @@ Features:
 - Standard JSON export compatible with all downstream RAG evaluation suites
 """
 
-import argparse
 import json
 import math
 from pathlib import Path
@@ -29,36 +28,13 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from components.generator import get_llm
-from components.loaders import pypdf_directory_loader, pypdf_loader, text_loader
+from components.loaders import load_documents
 from components.text_splitters import split_documents
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from prompts.synthesis_prompts import SYNTHESIS_SYSTEM_PROMPT, format_synthesis_prompt
 
 load_dotenv()
-
-
-def load_document(doc_path: str) -> list[Document]:
-    """Loads a document or directory of documents based on file type."""
-    path_obj = Path(doc_path)
-    if not path_obj.exists():
-        raise FileNotFoundError(f"Document path does not exist: {doc_path}")
-
-    if path_obj.is_dir():
-        print(f"Loading all PDF documents from directory: {doc_path}...")
-        return pypdf_directory_loader(str(path_obj))
-
-    ext = path_obj.suffix.lower()
-    if ext == ".pdf":
-        print(f"Loading PDF document: {path_obj.name}...")
-        return pypdf_loader(str(path_obj))
-    elif ext in (".txt", ".md", ".json", ".csv"):
-        print(f"Loading text document: {path_obj.name}...")
-        return text_loader(str(path_obj))
-    else:
-        # Fallback to text loader
-        print(f"Loading document as text: {path_obj.name}...")
-        return text_loader(str(path_obj))
 
 
 def sample_chunks(
@@ -221,7 +197,7 @@ def generate_golden_dataset(
         return completed_goldens[:max_goldens]
 
     # 2. Load and chunk source document
-    raw_docs = load_document(actual_doc_path)
+    raw_docs = load_documents(actual_doc_path)
     print(f"Splitting documents (chunk_size={chunk_size}, chunk_overlap={chunk_overlap})...")
     chunks = split_documents(
         raw_docs,
@@ -313,102 +289,5 @@ def generate_golden_dataset(
     return completed_goldens
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Production Golden Dataset Generator for RAG Evaluation."
-    )
-    parser.add_argument(
-        "--doc",
-        type=str,
-        default=str(ROOT / "docs" / "Facebooks-Corporate-Human-Rights-Policy.pdf"),
-        help="Path to source document (PDF, TXT, MD, or folder).",
-    )
-    parser.add_argument(
-        "--instruction",
-        type=str,
-        nargs="+",
-        default=None,
-        help="One or more custom prompt instructions/personas (e.g. 'Act as an examiner' 'Act as a beginner').",
-    )
-    parser.add_argument(
-        "--max-goldens",
-        type=int,
-        default=10,
-        help="Target number of golden QA pairs to generate (default: 10).",
-    )
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=1000,
-        help="Chunk size in characters (default: 1000).",
-    )
-    parser.add_argument(
-        "--chunk-overlap",
-        type=int,
-        default=150,
-        help="Chunk overlap in characters (default: 150).",
-    )
-    parser.add_argument(
-        "--sample-strategy",
-        type=str,
-        default="stride",
-        choices=["stride", "head_tail", "all"],
-        help="Chunk sampling strategy across large documents (default: 'stride').",
-    )
-    parser.add_argument(
-        "--provider",
-        type=str,
-        default="openai",
-        choices=["openai", "deepseek", "ollama"],
-        help="LLM provider (default: 'openai').",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="gpt-4o-mini",
-        help="Model name (default: 'gpt-4o-mini').",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.3,
-        help="LLM sampling temperature (default: 0.3).",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output JSON file path (default: evals/datasets/<doc_stem>_goldens.json).",
-    )
-    parser.add_argument(
-        "--no-checkpoint",
-        action="store_true",
-        help="Disable progress checkpointing.",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    output_path = args.output
-    if not output_path:
-        doc_stem = Path(args.doc).stem
-        output_path = str(ROOT / "evals" / "datasets" / f"{doc_stem}_goldens.json")
-
-    generate_golden_dataset(
-        doc_path=args.doc,
-        instructions=args.instruction,
-        output_path=output_path,
-        max_goldens=args.max_goldens,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
-        sample_strategy=args.sample_strategy,
-        provider=args.provider,
-        model_name=args.model,
-        temperature=args.temperature,
-        enable_checkpoint=not args.no_checkpoint,
-    )
-
-
 if __name__ == "__main__":
-    main()
+    generate_golden_dataset(max_goldens=5)
