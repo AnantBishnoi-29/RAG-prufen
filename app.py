@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from components.generator import generate_answer
-from components.retriever import build_retriever, retrieve_contexts
+from components.retriever import build_retriever, retrieve, retrieve_contexts
 from evals.scripts.generate_goldens import generate_golden_dataset
 
 load_dotenv()
@@ -69,7 +69,7 @@ async def serve_index():
 # API: Available Documents
 # ---------------------------------------------------------------------------
 @app.get("/api/documents")
-async def list_documents():
+def list_documents():
     """Lists available source documents in the docs/ directory."""
     docs_dir = ROOT / "docs"
     if not docs_dir.exists():
@@ -91,7 +91,7 @@ async def list_documents():
 # API: Benchmark Results Viewer
 # ---------------------------------------------------------------------------
 @app.get("/api/results")
-async def list_results():
+def list_results():
     """Lists all saved evaluation runs in evals/results/ with summary stats."""
     results_dir = ROOT / "evals" / "results"
     if not results_dir.exists():
@@ -109,12 +109,22 @@ async def list_results():
             elif "eval_type" in data.get("hyperparameters", {}):
                 run_type = data["hyperparameters"]["eval_type"]
 
+            cost_val = data.get("evaluationCost")
+            if cost_val is None and "cost_metrics" in data:
+                cost_val = data["cost_metrics"].get("total_cost_usd")
+
+            duration_val = data.get("runDuration")
+            if duration_val is None and "latency_metrics" in data:
+                mean_ms = data["latency_metrics"].get("total_latency_ms", {}).get("mean", 0)
+                cases_list = data.get("testCases") or data.get("per_query_results") or data.get("per_query_ops") or []
+                duration_val = round((mean_ms * len(cases_list)) / 1000.0, 2) if cases_list else None
+
             runs.append({
                 "filename": f.name,
                 "type": run_type,
                 "date": time.strftime("%Y-%m-%d %H:%M", time.localtime(f.stat().st_mtime)),
-                "duration": data.get("runDuration", None),
-                "cost": data.get("evaluationCost", None),
+                "duration": duration_val,
+                "cost": cost_val,
             })
         except Exception:
             continue
@@ -123,7 +133,7 @@ async def list_results():
 
 
 @app.get("/api/results/{filename}")
-async def get_result_detail(filename: str):
+def get_result_detail(filename: str):
     """Returns the full JSON content of a specific evaluation run."""
     safe_name = Path(filename).name
     target_file = ROOT / "evals" / "results" / safe_name
@@ -142,7 +152,7 @@ async def get_result_detail(filename: str):
 # API: Golden Datasets
 # ---------------------------------------------------------------------------
 @app.get("/api/datasets")
-async def list_datasets():
+def list_datasets():
     """Lists available golden datasets in evals/datasets/."""
     datasets_dir = ROOT / "evals" / "datasets"
     if not datasets_dir.exists():
@@ -166,7 +176,7 @@ async def list_datasets():
 
 
 @app.get("/api/datasets/{filename}")
-async def get_dataset_detail(filename: str):
+def get_dataset_detail(filename: str):
     """Returns the QA pairs for a specific golden dataset."""
     safe_name = Path(filename).name
     target_file = ROOT / "evals" / "datasets" / safe_name
@@ -188,23 +198,34 @@ class QueryRequest(BaseModel):
     query: str
     doc_path: str = "docs/Facebooks-Corporate-Human-Rights-Policy.pdf"
     vector_store: str = "chroma"
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+    embedding_provider: str = "openai"
+    splitter_type: str = "recursive"
     top_k: int = 3
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     prompt_template: str = "default"
     use_reranker: bool = False
+    use_hybrid: bool = False
     temperature: float = 0.0
 
 
 @app.post("/api/playground/query")
-async def run_playground_query(req: QueryRequest):
+def run_playground_query(req: QueryRequest):
     """
     Executes a live query through the decoupled RAG pipeline:
-    1. Builds retriever for selected document & vector store
+    1. Builds retriever for selected document & vector store (supports dense, BM25, and hybrid)
     2. Retrieves top-k chunks (with optional cross-encoder reranker)
     3. Generates grounded answer via LLM
     4. Measures and returns retrieval, generation, and total latency
     """
+    if req.chunk_overlap >= req.chunk_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chunk overlap ({req.chunk_overlap}) cannot be greater than or equal to chunk size ({req.chunk_size}).",
+        )
+
     clean_query = req.query.strip()
     if not clean_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
@@ -218,18 +239,22 @@ async def run_playground_query(req: QueryRequest):
         t0 = time.perf_counter()
         retriever = build_retriever(
             doc_path=str(full_doc_path),
+            splitter_type=req.splitter_type,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+            embedding_provider=req.embedding_provider,
             vector_store_type=req.vector_store,
-            chunk_size=500,
-            chunk_overlap=100,
             k=req.top_k,
+            use_hybrid=req.use_hybrid,
         )
 
-        retrieved_texts = retrieve_contexts(
+        retrieved_docs = retrieve(
             retriever=retriever,
             query=clean_query,
             use_reranker=req.use_reranker,
             top_k=req.top_k,
         )
+        retrieved_texts = [doc.page_content for doc in retrieved_docs]
         t1 = time.perf_counter()
 
         # Phase 2: Generation
@@ -247,15 +272,27 @@ async def run_playground_query(req: QueryRequest):
         generation_ms = (t2 - t1) * 1000.0
         total_ms = (t2 - t0) * 1000.0
 
-        # Structure chunks for UI display
+        def _extract_page(meta: dict | None) -> int | None:
+            if not meta:
+                return None
+            val = meta.get("page") if "page" in meta else meta.get("page_number")
+            if val is not None:
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        # Structure chunks for UI display with preserved metadata and page numbers
         formatted_chunks = [
             {
                 "index": i + 1,
-                "content": text,
-                "chars": len(text),
-                "page": None,
+                "content": doc.page_content,
+                "chars": len(doc.page_content),
+                "page": _extract_page(doc.metadata if hasattr(doc, "metadata") else None),
+                "metadata": doc.metadata if hasattr(doc, "metadata") and doc.metadata else {},
             }
-            for i, text in enumerate(retrieved_texts)
+            for i, doc in enumerate(retrieved_docs)
         ]
 
         return {
@@ -267,7 +304,12 @@ async def run_playground_query(req: QueryRequest):
             "total_latency_ms": total_ms,
             "metadata": {
                 "vector_store": req.vector_store,
+                "embedding_provider": req.embedding_provider,
+                "splitter_type": req.splitter_type,
+                "chunk_size": req.chunk_size,
+                "chunk_overlap": req.chunk_overlap,
                 "use_reranker": req.use_reranker,
+                "use_hybrid": req.use_hybrid,
                 "top_k": req.top_k,
                 "model": req.model_name,
                 "prompt_template": req.prompt_template,
@@ -290,7 +332,7 @@ class GoldenGenRequest(BaseModel):
 
 
 @app.post("/api/goldens/generate")
-async def trigger_golden_generation(req: GoldenGenRequest):
+def trigger_golden_generation(req: GoldenGenRequest):
     """Triggers prompt-styled golden dataset synthesis."""
     full_doc_path = ROOT / req.doc_path if not Path(req.doc_path).is_absolute() else Path(req.doc_path)
     if not full_doc_path.exists():
@@ -314,6 +356,87 @@ async def trigger_golden_generation(req: GoldenGenRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# API: Metric Registry & Selective Evaluation
+# ---------------------------------------------------------------------------
+from evals.registry import get_metrics_catalog
+from evals.test_rag import run_rag_eval
+
+
+@app.get("/api/evaluate/metrics")
+def list_metrics():
+    """Returns the full catalog of available evaluation metrics grouped by category."""
+    return get_metrics_catalog()
+
+
+class EvalRunRequest(BaseModel):
+    doc_path: str = "docs/Facebooks-Corporate-Human-Rights-Policy.pdf"
+    dataset_path: str = "evals/datasets/golden_dataset.json"
+    vector_store: str = "chroma"
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+    embedding_provider: str = "openai"
+    splitter_type: str = "recursive"
+    use_reranker: bool = False
+    use_hybrid: bool = False
+    top_k: int = 3
+    provider: str = "openai"
+    model_name: str = "gpt-4o-mini"
+    temperature: float = 0.0
+    prompt_template: str = "default"
+    eval_model: str = "gpt-4o-mini"
+    max_cases: int = 2
+    scope: str = "all"  # "all", "retriever_only", "generator_only"
+    selected_metrics: list[str] | None = None
+
+
+@app.post("/api/evaluate/run")
+def trigger_eval_run(req: EvalRunRequest):
+    """Executes a selective evaluation run based on user-chosen scope and metrics."""
+    if req.chunk_overlap >= req.chunk_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chunk overlap ({req.chunk_overlap}) cannot be greater than or equal to chunk size ({req.chunk_size}).",
+        )
+
+    full_doc_path = ROOT / req.doc_path if not Path(req.doc_path).is_absolute() else Path(req.doc_path)
+    if not full_doc_path.exists():
+        raise HTTPException(status_code=404, detail=f"Document '{req.doc_path}' not found.")
+
+    full_dataset_path = ROOT / req.dataset_path if not Path(req.dataset_path).is_absolute() else Path(req.dataset_path)
+    if not full_dataset_path.exists():
+        raise HTTPException(status_code=404, detail=f"Dataset '{req.dataset_path}' not found.")
+
+    try:
+        run_result = run_rag_eval(
+            doc_path=str(full_doc_path),
+            dataset_path=str(full_dataset_path),
+            vector_store_type=req.vector_store,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+            embedding_provider=req.embedding_provider,
+            splitter_type=req.splitter_type,
+            use_reranker=req.use_reranker,
+            use_hybrid=req.use_hybrid,
+            top_k=req.top_k,
+            provider=req.provider,
+            model_name=req.model_name,
+            temperature=req.temperature,
+            prompt_template=req.prompt_template,
+            max_cases=req.max_cases,
+            eval_model=req.eval_model,
+            scope=req.scope,
+            selected_metrics=req.selected_metrics,
+        )
+        return {
+            "status": "success",
+            "message": f"Evaluation [{req.scope}] finished successfully.",
+            "scope": req.scope,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
