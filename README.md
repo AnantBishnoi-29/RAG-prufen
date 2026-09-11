@@ -58,36 +58,40 @@ rag_eval_suite/
 ├── docs/                        # Raw input documents (PDFs, text files, etc.)
 │   ├── Facebooks-Corporate-Human-Rights-Policy.pdf
 │   └── open_elective.pdf
-├── databases/                   # Centralized storage for persistent vector databases
-│   └── chroma/                  # (and future: faiss, qdrant, etc.)
+├── databases/                   # Centralized storage for persistent vector databases & BM25
+│   ├── chroma/
+│   ├── faiss/
+│   └── bm25/
 ├── prompts/                     # Prompt templates isolated from code
-│   └── qa_templates.py
+│   ├── qa_templates.py
+│   └── synthesis_prompts.py
 ├── components/                  # Modular RAG Building Blocks
 │   ├── loaders.py               # Document loaders
 │   ├── text_splitters.py        # Text splitters
 │   ├── embeddings.py            # Embedding models
-│   ├── vector_stores.py         # Vector databases & retrievers
+│   ├── vector_stores.py         # Vector databases, BM25 retriever & disk caching
 │   ├── rerankers.py             # Cross-encoder / reranking models
 │   ├── generator.py             # Answer generation & LLM interface
 │   └── cost_tracker.py          # Token usage & cost tracking
 ├── evals/                       # Evaluation Suite
-│   ├── datasets/                # Golden datasets (JSON)
-│   │   └── golden_dataset.json
 │   ├── datasets/                # Golden & Safety datasets (JSON)
 │   │   ├── golden_dataset.json
 │   │   └── safety_dataset.json
 │   ├── results/                 # Exported JSON benchmark runs
 │   ├── scripts/                 # Dataset generation scripts
 │   │   └── generate_goldens.py
-│   ├── test_generator.py        # Dedicated Faithfulness, Relevancy & Hallucination evals
+│   ├── registry.py              # Metric catalog & dynamic discovery registry
 │   ├── test_retriever.py        # Dedicated Context Recall & Context Precision evals
-│   └── test_rag.py              # End-to-end Faithfulness & Relevancy evals
-│   ├── test_generator.py        # Dedicated generator isolation evals
-│   ├── test_retriever.py        # Dedicated retriever evals (Recall & Precision)
-│   ├── test_generator.py        # Dedicated generator isolation evals (Faithfulness, Relevancy, Hallucination)
+│   ├── test_generator.py        # Dedicated Faithfulness, Relevancy & Hallucination evals
 │   ├── test_safety.py           # Safety & robustness evals (Toxicity, Bias, Injections)
 │   ├── test_ops.py              # Operations & performance evals (Latency, Tokens, Cost, Throughput)
-│   └── test_rag.py              # End-to-end live RAG pipeline evals
+│   └── test_rag.py              # End-to-end live RAG pipeline evals with attached Ops metrics
+├── web/                         # Interactive Web Dashboard (HTML5, CSS3, Vanilla JS)
+│   ├── index.html
+│   └── static/
+│       ├── app.js
+│       └── style.css
+├── app.py                       # FastAPI backend server
 └── main.py                      # Pipeline entry point
 ```
 
@@ -107,13 +111,8 @@ Following the principle: **First make it work, then make it work better.**
 - [x] **Phase 3: Retriever Decoupling & Evaluation**
   - Decoupled loaders, splitters, embeddings, vector stores, and reranker
   - Dedicated retriever evaluations: **Context Recall** and **Context Precision** (`evals/test_retriever.py`)
-- [x] **Phase 4: Generator Decoupling & Evaluation (Completed)**
-- [x] **Phase 4: Generator Decoupling & Safety Evaluation (Completed)**
-- [x] **Phase 4: Generator Decoupling, Safety & Ops Evaluation (Completed)**
+- [x] **Phase 4: Generator Decoupling, Safety & Ops Evaluation**
   - Decoupled LLM factory (`get_llm`) supporting OpenAI, DeepSeek, and Ollama/Local
-  - Prompt template registry (`prompts/qa_templates.py`: default, concise, reasoning)
-  - Dedicated generator evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`) supporting both isolated ground-truth context and live retrieval mode
-  - Dedicated generator isolation evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`)
   - Prompt template registry (`prompts/qa_templates.py`, `prompts/synthesis_prompts.py`)
   - Dedicated generator evaluations: **Faithfulness**, **Answer Relevancy**, and **Hallucination** (`evals/test_generator.py`)
   - Dedicated safety & robustness evaluations: **Toxicity**, **Bias**, and **Adversarial Injections** (`evals/test_safety.py`, `evals/datasets/safety_dataset.json`)
@@ -121,11 +120,17 @@ Following the principle: **First make it work, then make it work better.**
   - End-to-end live RAG evaluation runner (`evals/test_rag.py`)
   - **Production Golden Dataset Generator** (`evals/scripts/generate_goldens.py`):
     - Direct, high-throughput LLM pipeline (no DeepEval synthesis overhead)
-    - Custom user-prompt-driven styling (supports multiple instructions/perspectives)
-    - Uniform stride sampling across large enterprise documents (e.g. 300+ page PDFs)
+    - Dynamic prompt-driven styling (supports custom instructions/perspectives)
+    - Uniform stride sampling across large enterprise documents
     - Automatic checkpointing and resumability (`.checkpoint.json`)
-- [ ] **Phase 5: Dashboard & Comparison Interface (Next)**
-  - Streamlit web interface for interactive benchmarking and side-by-side comparison.
-- [x] **Phase 5: Interactive Web Dashboard & Comparison UI (Completed)**
-  - Pure HTML5, CSS3, and Vanilla JavaScript frontend (`web/index.html`, `web/static/style.css`, `web/static/app.js`)
-  - FastAPI backend server (`app.py`) providing interactive playground, results browser, side-by-side run comparison, and dataset synthesis
+- [x] **Phase 5: Interactive Web Dashboard & Advanced Benchmarking**
+  - Pure HTML5, CSS3, and modern Vanilla JavaScript frontend (`web/index.html`, `web/static/style.css`, `web/static/app.js`)
+  - Native FastAPI backend server (`app.py`) providing:
+    - **Live Playground**: Interactive querying, top-k slider, vector store switching, reranker toggle, and chunk inspection with live latency breakdown.
+    - **Benchmark Results Viewer**: Scorecards, Ops stats (P50/P95 latency, tokens/sec, cost), and per-test-case inspector.
+    - **Side-by-Side Comparison**: Comparative diffing of hyperparameters, metric deltas (+/- %), duration, and cost.
+    - **Golden Dataset Viewer & Synthesis**: Browse datasets and trigger prompt-styled golden generation.
+    - **Selective Evaluation Launcher & Metric Registry** (`evals/registry.py`): Granular scope selection (`End-to-End`, `Retriever Only`, `Generator Only`) with conditional generation bypass.
+    - **Vector Index Caching & Fast Disk Loading**: Deterministic index slugs (`c_<doc>_<chunk_size>_<hash>`) mounting local vector stores in ~500ms (>95% faster, 0 tokens on hit).
+    - **BM25 Sparse Keyword Retrieval & Disk Caching**: Zero-cost lexical retrieval with sub-millisecond pkl deserialization and Cross-Encoder reranking compatibility.
+    - **Hybrid Search (Dense + BM25 via Reciprocal Rank Fusion)**: Concurrent retrieval fusing semantic vector search with BM25 keyword search using deterministic RRF scoring, compatible with cross-encoder reranking and dynamic UI toggles.
