@@ -691,3 +691,180 @@ body {
   color: #f85149;
 }
 
+/* ==========================================================================
+   Benchmark Evaluation Launcher & Scope Styling
+   ========================================================================== */
+.eval-launcher-panel {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.scope-selection-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.scope-card {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.scope-card input[type="radio"] {
+  display: none;
+}
+
+.scope-card .scope-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scope-card .scope-icon {
+  font-size: 20px;
+}
+
+.scope-card strong {
+  font-size: 13px;
+  display: block;
+  color: var(--text-main);
+}
+
+.scope-card p {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.scope-card:hover {
+  border-color: var(--border-light);
+  background-color: var(--bg-hover);
+}
+
+.scope-card.active {
+  border-color: var(--accent-primary);
+  background-color: rgba(31, 111, 235, 0.12);
+}
+
+.scope-card.active strong {
+  color: var(--accent-primary-hover);
+}
+
+.metrics-selection-section {
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.metrics-heading {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+.metrics-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.metric-category-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.category-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.category-badge.retriever {
+  background-color: rgba(57, 197, 207, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(57, 197, 207, 0.3);
+}
+
+.category-badge.generator {
+  background-color: rgba(137, 87, 229, 0.15);
+  color: var(--accent-purple);
+  border: 1px solid rgba(137, 87, 229, 0.3);
+}
+
+.category-badge.ops {
+  background-color: rgba(210, 153, 34, 0.15);
+  color: var(--accent-warning);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+}
+
+.category-badge.safety {
+  background-color: rgba(218, 54, 51, 0.15);
+  color: #f85149;
+  border: 1px solid rgba(218, 54, 51, 0.3);
+}
+
+.category-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metric-checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  user-select: none;
+}
+
+.metric-checkbox-item input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent-primary);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.metric-text strong {
+  font-size: 13px;
+  color: var(--text-main);
+  display: block;
+}
+
+.metric-text p {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+/* Grayed out / disabled state when scope excludes this metric */
+.metric-checkbox-item.disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.metric-checkbox-item.disabled strong,
+.metric-checkbox-item.disabled p {
+  color: var(--text-dim) !important;
+}
+

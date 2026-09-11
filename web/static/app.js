@@ -18,6 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const playProviderSelect = document.getElementById("play-provider");
   const playModelInput = document.getElementById("play-model");
   const playPromptSelect = document.getElementById("play-prompt");
+  const playHybridCheck = document.getElementById("play-hybrid");
   const playRerankCheck = document.getElementById("play-rerank");
   const playQueryText = document.getElementById("play-query");
   const btnRunQuery = document.getElementById("btn-run-query");
@@ -40,6 +41,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const opsStatsGrid = document.getElementById("ops-stats-grid");
   const testCasesBody = document.getElementById("test-cases-body");
   const casesCountSpan = document.getElementById("cases-count");
+
+  // Benchmark Evaluation Launcher Elements
+  const evalDocSelect = document.getElementById("eval-doc");
+  const evalDatasetSelect = document.getElementById("eval-dataset");
+  const evalStoreSelect = document.getElementById("eval-store");
+  const evalCasesRange = document.getElementById("eval-cases");
+  const evalCasesVal = document.getElementById("eval-cases-val");
+  const evalHybridCheck = document.getElementById("eval-hybrid");
+  const evalRerankCheck = document.getElementById("eval-rerank");
+  const btnStartEval = document.getElementById("btn-start-eval");
+  const btnEvalText = document.getElementById("btn-eval-text");
+  const btnEvalSpinner = document.getElementById("btn-eval-spinner");
+  const evalStatusMsg = document.getElementById("eval-status-msg");
+  const metricsCheckboxContainer = document.getElementById("metrics-checkbox-container");
+  const scopeRadios = document.querySelectorAll('input[name="eval-scope"]');
+  const scopeCards = document.querySelectorAll(".scope-card");
 
   // Compare Elements
   const compareRunA = document.getElementById("compare-run-a");
@@ -120,6 +137,35 @@ document.addEventListener("DOMContentLoaded", () => {
     genCountVal.textContent = e.target.value;
   });
 
+  if (evalCasesRange && evalCasesVal) {
+    evalCasesRange.addEventListener("input", (e) => {
+      evalCasesVal.textContent = e.target.value;
+    });
+  }
+
+  // Auto-disable hybrid toggle if BM25 is selected as primary store
+  if (playStoreSelect && playHybridCheck) {
+    playStoreSelect.addEventListener("change", () => {
+      if (playStoreSelect.value === "bm25") {
+        playHybridCheck.checked = false;
+        playHybridCheck.disabled = true;
+      } else {
+        playHybridCheck.disabled = false;
+      }
+    });
+  }
+
+  if (evalStoreSelect && evalHybridCheck) {
+    evalStoreSelect.addEventListener("change", () => {
+      if (evalStoreSelect.value === "bm25") {
+        evalHybridCheck.checked = false;
+        evalHybridCheck.disabled = true;
+      } else {
+        evalHybridCheck.disabled = false;
+      }
+    });
+  }
+
   // Modal close
   btnCloseModal.addEventListener("click", () => {
     modal.classList.add("hidden");
@@ -137,6 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const docs = await res.json();
       playDocSelect.innerHTML = "";
       genDocSelect.innerHTML = "";
+      if (evalDocSelect) evalDocSelect.innerHTML = "";
 
       docs.forEach(doc => {
         const opt1 = document.createElement("option");
@@ -148,6 +195,13 @@ document.addEventListener("DOMContentLoaded", () => {
         opt2.value = doc.path;
         opt2.textContent = doc.name;
         genDocSelect.appendChild(opt2);
+
+        if (evalDocSelect) {
+          const opt3 = document.createElement("option");
+          opt3.value = doc.path;
+          opt3.textContent = doc.name;
+          evalDocSelect.appendChild(opt3);
+        }
       });
     } catch (err) {
       console.error("Failed to load documents:", err);
@@ -197,15 +251,22 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch("/api/datasets");
       const datasets = await res.json();
       selectDataset.innerHTML = "";
+      if (evalDatasetSelect) evalDatasetSelect.innerHTML = "";
 
       if (datasets.length === 0) {
         selectDataset.innerHTML = "<option value=''>No datasets found</option>";
+        if (evalDatasetSelect) evalDatasetSelect.innerHTML = "<option value=''>No datasets found</option>";
         return;
       }
 
       datasets.forEach(ds => {
         const opt = new Option(`${ds.filename} (${ds.count} pairs)`, ds.filename);
         selectDataset.appendChild(opt);
+
+        if (evalDatasetSelect) {
+          const optEval = new Option(`${ds.filename} (${ds.count} pairs)`, `evals/datasets/${ds.filename}`);
+          evalDatasetSelect.appendChild(optEval);
+        }
       });
 
       if (datasets.length > 0) {
@@ -235,15 +296,23 @@ document.addEventListener("DOMContentLoaded", () => {
     playChunksBox.innerHTML = "<div class='placeholder-text'>Fetching chunks...</div>";
     playTimingBox.classList.add("hidden");
 
+    const playEmbeddings = document.getElementById("play-embeddings");
+    const playChunkSize = document.getElementById("play-chunk-size");
+    const playChunkOverlap = document.getElementById("play-chunk-overlap");
+
     const payload = {
       query: query,
       doc_path: playDocSelect.value,
       vector_store: playStoreSelect.value,
+      embedding_provider: playEmbeddings ? playEmbeddings.value : "openai",
+      chunk_size: playChunkSize ? (parseInt(playChunkSize.value, 10) || 500) : 500,
+      chunk_overlap: playChunkOverlap ? (parseInt(playChunkOverlap.value, 10) || 100) : 100,
       top_k: parseInt(playTopkRange.value, 10),
       provider: playProviderSelect.value,
       model_name: playModelInput.value.trim() || "gpt-4o-mini",
       prompt_template: playPromptSelect.value,
-      use_reranker: playRerankCheck.checked
+      use_reranker: playRerankCheck ? playRerankCheck.checked : false,
+      use_hybrid: playHybridCheck ? playHybridCheck.checked : false
     };
 
     try {
@@ -303,6 +372,256 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // =========================================================================
   // 3. Benchmark Runs Detail Viewer
+  // 3. Benchmark Evaluation Launcher & Metrics Registry
+  // =========================================================================
+  async function loadMetricsCatalog() {
+    try {
+      const res = await fetch("/api/evaluate/metrics");
+      if (!res.ok) throw new Error("Failed to load metrics catalog");
+      const metrics = await res.json();
+
+      if (!metricsCheckboxContainer) return;
+      metricsCheckboxContainer.innerHTML = "";
+
+      // Group metrics by category
+      const categories = {};
+      metrics.forEach(m => {
+        if (!categories[m.category]) {
+          categories[m.category] = {
+            label: m.category_label || m.category,
+            items: []
+          };
+        }
+        categories[m.category].items.push(m);
+      });
+
+      // Fixed order preference: retriever -> generator -> safety -> ops
+      const catOrder = ["retriever", "generator", "safety", "ops"];
+      const sortedCatKeys = Object.keys(categories).sort((a, b) => {
+        const idxA = catOrder.indexOf(a);
+        const idxB = catOrder.indexOf(b);
+        return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+      });
+
+      sortedCatKeys.forEach(catKey => {
+        const cat = categories[catKey];
+        const card = document.createElement("div");
+        card.className = "metric-category-card";
+        card.setAttribute("data-category", catKey);
+
+        const badgeClass = catKey === "retriever" ? "retriever" : (catKey === "generator" ? "generator" : (catKey === "safety" ? "safety" : "ops"));
+
+        let itemsHtml = "";
+        cat.items.forEach(m => {
+          itemsHtml += `
+            <label class="metric-checkbox-item" data-category="${escapeHtml(m.category)}" data-id="${escapeHtml(m.id)}">
+              <input type="checkbox" value="${escapeHtml(m.id)}" ${m.default_checked ? "checked" : ""} />
+              <div class="metric-text">
+                <strong>${escapeHtml(m.name)}</strong>
+                <p>${escapeHtml(m.description)}</p>
+              </div>
+            </label>
+          `;
+        });
+
+        card.innerHTML = `
+          <span class="category-badge ${badgeClass}">${escapeHtml(cat.label)}</span>
+          <div class="category-items-list">
+            ${itemsHtml}
+          </div>
+        `;
+        metricsCheckboxContainer.appendChild(card);
+      });
+
+      // Track manual unchecks so scope switches don't re-check metrics explicitly turned off by user
+      // Track manual unchecks so scope switches don't re-check metrics explicitly turned off or opt-in by default
+      metricsCheckboxContainer.querySelectorAll(".metric-checkbox-item").forEach(item => {
+        const cb = item.querySelector('input[type="checkbox"]');
+        if (cb) {
+          if (!cb.checked) {
+            item.dataset.manuallyUnchecked = "true";
+          }
+          cb.addEventListener("change", () => {
+            if (!cb.checked) {
+              item.dataset.manuallyUnchecked = "true";
+            } else {
+              delete item.dataset.manuallyUnchecked;
+            }
+          });
+        }
+      });
+
+      // Apply initial scope filtering
+      applyScopeFilter();
+    } catch (err) {
+      console.error("Failed to load metrics catalog:", err);
+      if (metricsCheckboxContainer) {
+        metricsCheckboxContainer.innerHTML = "<div class='placeholder-text'>Failed to load metrics catalog.</div>";
+      }
+    }
+  }
+
+  function applyScopeFilter() {
+    const activeRadio = document.querySelector('input[name="eval-scope"]:checked');
+    const scope = activeRadio ? activeRadio.value : "all";
+
+    // Update active visual state on scope cards
+    scopeCards.forEach(card => {
+      const radio = card.querySelector('input[type="radio"]');
+      if (radio && radio.checked) {
+        card.classList.add("active");
+      } else {
+        card.classList.remove("active");
+      }
+    });
+
+    // Update metric checkboxes based on scope:
+    // - retriever_only: generator metrics disabled/unchecked, retriever & ops enabled
+    // - generator_only: retriever metrics disabled/unchecked, generator & ops enabled
+    // - all: all metrics enabled
+    // - ops metrics: always enabled regardless of scope
+    const items = document.querySelectorAll(".metric-checkbox-item");
+    items.forEach(item => {
+      const category = item.getAttribute("data-category");
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      if (!checkbox) return;
+
+      if (scope === "retriever_only") {
+        if (category === "generator" || category === "safety") {
+          item.classList.add("disabled");
+          checkbox.disabled = true;
+          checkbox.checked = false;
+        } else {
+          item.classList.remove("disabled");
+          checkbox.disabled = false;
+          if (!item.dataset?.manuallyUnchecked) {
+            checkbox.checked = true;
+          }
+        }
+      } else if (scope === "generator_only") {
+        if (category === "retriever") {
+          item.classList.add("disabled");
+          checkbox.disabled = true;
+          checkbox.checked = false;
+        } else {
+          item.classList.remove("disabled");
+          checkbox.disabled = false;
+          if (!item.dataset?.manuallyUnchecked) {
+            checkbox.checked = true;
+          }
+        }
+      } else {
+        // scope === "all": All enabled
+        item.classList.remove("disabled");
+        checkbox.disabled = false;
+        if (!item.dataset?.manuallyUnchecked) {
+          checkbox.checked = true;
+        }
+      }
+    });
+  }
+
+  scopeRadios.forEach(radio => {
+    radio.addEventListener("change", applyScopeFilter);
+  });
+
+  scopeCards.forEach(card => {
+    card.addEventListener("click", () => {
+      const radio = card.querySelector('input[type="radio"]');
+      if (radio && !radio.checked) {
+        radio.checked = true;
+        applyScopeFilter();
+      }
+    });
+  });
+
+  if (btnStartEval) {
+    btnStartEval.addEventListener("click", async () => {
+      const docPath = evalDocSelect.value;
+      const datasetPath = evalDatasetSelect.value;
+      const vectorStore = evalStoreSelect.value;
+      const maxCases = parseInt(evalCasesRange.value, 10);
+
+      const activeRadio = document.querySelector('input[name="eval-scope"]:checked');
+      const scope = activeRadio ? activeRadio.value : "all";
+
+      // Collect all active checked metric IDs
+      const selectedMetrics = [];
+      document.querySelectorAll('#metrics-checkbox-container input[type="checkbox"]:checked').forEach(cb => {
+        if (!cb.disabled) {
+          selectedMetrics.push(cb.value);
+        }
+      });
+
+      if (selectedMetrics.length === 0) {
+        alert("Please select at least one evaluation metric to benchmark.");
+        return;
+      }
+
+      if (!docPath || !datasetPath) {
+        alert("Please select both a document corpus and an evaluation dataset.");
+        return;
+      }
+
+      btnStartEval.disabled = true;
+      btnEvalText.textContent = "Running Benchmark (this may take 20-60s)...";
+      btnEvalSpinner.classList.remove("hidden");
+      evalStatusMsg.className = "status-banner hidden";
+
+      const evalEmbeddings = document.getElementById("eval-embeddings");
+      const evalChunkSize = document.getElementById("eval-chunk-size");
+      const evalChunkOverlap = document.getElementById("eval-chunk-overlap");
+
+      const payload = {
+        doc_path: docPath,
+        dataset_path: datasetPath,
+        vector_store: vectorStore,
+        embedding_provider: evalEmbeddings ? evalEmbeddings.value : "openai",
+        chunk_size: evalChunkSize ? (parseInt(evalChunkSize.value, 10) || 500) : 500,
+        chunk_overlap: evalChunkOverlap ? (parseInt(evalChunkOverlap.value, 10) || 100) : 100,
+        top_k: 3,
+        use_reranker: evalRerankCheck ? evalRerankCheck.checked : false,
+        use_hybrid: evalHybridCheck ? evalHybridCheck.checked : false,
+        provider: "openai",
+        model_name: "gpt-4o-mini",
+        temperature: 0.0,
+        prompt_template: "default",
+        eval_model: "gpt-4o-mini",
+        max_cases: maxCases,
+        scope: scope,
+        selected_metrics: selectedMetrics
+      };
+
+      try {
+        const res = await fetch("/api/evaluate/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Benchmark execution failed");
+
+        evalStatusMsg.className = "status-banner success";
+        evalStatusMsg.textContent = `🎉 ${data.message || "Benchmark evaluation completed successfully!"}`;
+        evalStatusMsg.classList.remove("hidden");
+
+        // Reload runs list so the new evaluation run is loaded and displayed immediately
+        await loadRuns();
+      } catch (err) {
+        evalStatusMsg.className = "status-banner error";
+        evalStatusMsg.textContent = `❌ ${err.message}`;
+        evalStatusMsg.classList.remove("hidden");
+      } finally {
+        btnStartEval.disabled = false;
+        btnEvalText.textContent = "▶️ Run Selected Benchmark";
+        btnEvalSpinner.classList.add("hidden");
+      }
+    });
+  }
+
+  // =========================================================================
+  // 4. Benchmark Runs Detail Viewer
   // =========================================================================
   selectRun.addEventListener("change", (e) => {
     if (e.target.value) loadRunDetail(e.target.value);
@@ -332,14 +651,25 @@ document.addEventListener("DOMContentLoaded", () => {
     runMetaStrip.classList.remove("hidden");
 
     const hp = data.hyperparameters || {};
+    const costVal = (data.evaluationCost !== undefined && data.evaluationCost !== null)
+      ? data.evaluationCost
+      : (data.cost_metrics?.total_cost_usd !== undefined ? data.cost_metrics.total_cost_usd : 0);
+
+    const durVal = (data.runDuration !== undefined && data.runDuration !== null)
+      ? data.runDuration.toFixed(2) + "s"
+      : (data.latency_metrics?.total_latency_ms?.mean
+          ? ((data.latency_metrics.total_latency_ms.mean * (data.testCases?.length || data.per_query_results?.length || 1)) / 1000).toFixed(2) + "s"
+          : "N/A");
+
     const pills = [
-      `Type: <strong>${hp.eval_type || "N/A"}</strong>`,
-      `Store: <strong>${hp.vector_store || "N/A"}</strong>`,
+      `Type: <strong>${hp.eval_type || (data.timestamp ? "ops_eval" : "N/A")}</strong>`,
+      `Store: <strong>${hp.vector_store || hp.document || "N/A"}</strong>`,
+      `Hybrid: <strong>${hp.use_hybrid ? "Enabled (BM25+Dense)" : "Disabled"}</strong>`,
       `Model: <strong>${hp.model_name || "N/A"}</strong>`,
       `Reranker: <strong>${hp.use_reranker ? "Enabled" : "Disabled"}</strong>`,
       `Top-K: <strong>${hp.top_k || "N/A"}</strong>`,
-      `Duration: <strong>${data.runDuration ? data.runDuration.toFixed(2) + "s" : "N/A"}</strong>`,
-      `Cost: <strong>$${data.evaluationCost ? data.evaluationCost.toFixed(5) : "0.00"}</strong>`
+      `Duration: <strong>${durVal}</strong>`,
+      `Cost: <strong>$${typeof costVal === "number" ? costVal.toFixed(5) : "0.00"}</strong>`
     ];
 
     pills.forEach(p => {
@@ -377,6 +707,27 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
         metricsGrid.appendChild(card);
       });
+    } else if (data.latency_metrics) {
+      // If no DeepEval quality metrics (pure Ops run), show Ops summary in the top cards grid
+      const lat = data.latency_metrics;
+      const tok = data.token_metrics || {};
+      const cost = data.cost_metrics || {};
+      const topOpsCards = [
+        { title: "Average Latency", val: `${lat.total_latency_ms?.mean?.toFixed(1) || 0}ms`, badge: "Mean E2E", color: "#58a6ff" },
+        { title: "P95 Tail Latency", val: `${lat.total_latency_ms?.p95?.toFixed(1) || 0}ms`, badge: "Tail Latency", color: "#d29922" },
+        { title: "Generation Throughput", val: `${tok.avg_throughput_tokens_per_sec?.toFixed(1) || 0} t/s`, badge: "Tokens/sec", color: "#3fb950" },
+        { title: "Total Cost", val: `$${cost.total_cost_usd ? cost.total_cost_usd.toFixed(5) : "0.00"}`, badge: "API Cost", color: "#a371f7" }
+      ];
+      topOpsCards.forEach(c => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `
+          <div class="metric-title">${c.title}</div>
+          <div class="metric-value" style="color: ${c.color}">${c.val}</div>
+          <span class="metric-badge badge-info">${c.badge}</span>
+        `;
+        metricsGrid.appendChild(card);
+      });
     }
 
     // Operational Latency & Ops Run Data
@@ -410,7 +761,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderTestCasesTable(data) {
     testCasesBody.innerHTML = "";
-    const cases = data.testCases || data.per_query_results || [];
+    const cases = data.testCases || data.per_query_results || data.per_query_ops || [];
     casesCountSpan.textContent = cases.length;
 
     if (cases.length === 0) {
@@ -421,16 +772,28 @@ document.addEventListener("DOMContentLoaded", () => {
     cases.forEach((tc, idx) => {
       const tr = document.createElement("tr");
       const inputQuery = tc.input || tc.query || "N/A";
-      const isSuccess = tc.success !== undefined ? tc.success : (tc.flaky === false);
+      let isSuccess = tc.success;
+      if (isSuccess === undefined) {
+        isSuccess = tc.flaky !== undefined ? !tc.flaky : true;
+      }
 
       let scoresHtml = "";
-      if (tc.metricsData) {
+      if (tc.metricsData && tc.metricsData.length > 0) {
         scoresHtml = tc.metricsData.map(m => {
           const color = m.score >= (m.threshold || 0.7) ? "#3fb950" : "#f85149";
           return `<span style="font-size: 11px; margin-right: 6px; color: ${color}; font-weight: 600;">${m.name}: ${m.score.toFixed(2)}</span>`;
         }).join("");
       } else if (tc.total_ms) {
         scoresHtml = `<span style="font-size: 11px; color: #58a6ff;">Total: ${tc.total_ms.toFixed(1)}ms | Ret: ${tc.retrieval_ms?.toFixed(1)}ms</span>`;
+      }
+
+      // Check for attached per-query ops info
+      const opsInfo = tc.total_ms ? tc : (data.per_query_ops && data.per_query_ops[idx]);
+      if (opsInfo && tc.metricsData && tc.metricsData.length > 0) {
+        const opsBadge = `<span style="font-size: 11px; color: #58a6ff; margin-left: 4px;">(${opsInfo.total_ms.toFixed(0)}ms | $${opsInfo.cost_usd ? opsInfo.cost_usd.toFixed(5) : "0.00"})</span>`;
+        scoresHtml = `${scoresHtml} ${opsBadge}`;
+      } else if (opsInfo && !scoresHtml) {
+        scoresHtml = `<span style="font-size: 11px; color: #58a6ff;">Total: ${opsInfo.total_ms.toFixed(1)}ms | Ret: ${opsInfo.retrieval_ms?.toFixed(1)}ms | Gen: ${opsInfo.generation_ms?.toFixed(1)}ms</span>`;
       }
 
       tr.innerHTML = `
@@ -563,7 +926,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const hpB = runB.hyperparameters || {};
 
     // Hyperparameters rows
-    const hpKeys = ["eval_type", "vector_store", "model_name", "use_reranker", "top_k", "chunk_size", "prompt_template"];
+    const hpKeys = ["eval_type", "vector_store", "use_hybrid", "model_name", "use_reranker", "top_k", "chunk_size", "prompt_template"];
     hpKeys.forEach(k => {
       const vA = hpA[k] !== undefined ? String(hpA[k]) : "N/A";
       const vB = hpB[k] !== undefined ? String(hpB[k]) : "N/A";
@@ -618,8 +981,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // Duration / Cost comparison
-    const durA = runA.runDuration ? runA.runDuration.toFixed(2) + "s" : "N/A";
-    const durB = runB.runDuration ? runB.runDuration.toFixed(2) + "s" : "N/A";
+    const durA = runA.runDuration ? runA.runDuration.toFixed(2) + "s" : (runA.latency_metrics?.total_latency_ms?.mean ? (runA.latency_metrics.total_latency_ms.mean / 1000).toFixed(2) + "s (avg)" : "N/A");
+    const durB = runB.runDuration ? runB.runDuration.toFixed(2) + "s" : (runB.latency_metrics?.total_latency_ms?.mean ? (runB.latency_metrics.total_latency_ms.mean / 1000).toFixed(2) + "s (avg)" : "N/A");
     const trDur = document.createElement("tr");
     trDur.innerHTML = `
       <td><strong>Total Run Duration</strong></td>
@@ -628,6 +991,27 @@ document.addEventListener("DOMContentLoaded", () => {
       <td>-</td>
     `;
     comparisonBody.appendChild(trDur);
+
+    const costA = runA.evaluationCost !== undefined ? runA.evaluationCost : runA.cost_metrics?.total_cost_usd;
+    const costB = runB.evaluationCost !== undefined ? runB.evaluationCost : runB.cost_metrics?.total_cost_usd;
+    if (costA !== undefined || costB !== undefined) {
+      const costAStr = costA !== undefined ? `$${costA.toFixed(5)}` : "N/A";
+      const costBStr = costB !== undefined ? `$${costB.toFixed(5)}` : "N/A";
+      let costDelta = "-";
+      if (typeof costA === "number" && typeof costB === "number" && costA > 0) {
+        const pct = ((costB - costA) / costA) * 100;
+        const color = pct <= 0 ? "#3fb950" : "#f85149";
+        costDelta = `<span style="color: ${color}; font-weight: 700;">${pct > 0 ? "+" : ""}${pct.toFixed(1)}%</span>`;
+      }
+      const trCost = document.createElement("tr");
+      trCost.innerHTML = `
+        <td><strong>Total Cost (USD)</strong></td>
+        <td>${costAStr}</td>
+        <td>${costBStr}</td>
+        <td>${costDelta}</td>
+      `;
+      comparisonBody.appendChild(trCost);
+    }
   }
 
   // =========================================================================
@@ -732,5 +1116,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDocuments();
   loadRuns();
   loadDatasets();
+  loadMetricsCatalog();
 });
 

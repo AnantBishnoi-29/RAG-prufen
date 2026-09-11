@@ -72,16 +72,37 @@
                   <option value="chroma" selected>Chroma DB</option>
                   <option value="faiss">FAISS</option>
                   <option value="qdrant">Qdrant</option>
+                  <option value="bm25">BM25 (Keyword Search)</option>
                 </select>
               </div>
 
               <div class="form-group">
-                <label for="play-topk">Top-K Chunks (<span id="topk-val">3</span>)</label>
-                <input type="range" id="play-topk" min="1" max="10" value="3" class="input-range" />
+                <label for="play-embeddings">Embedding Provider</label>
+                <select id="play-embeddings" class="input-select">
+                  <option value="openai" selected>OpenAI (text-embedding-3-small)</option>
+                  <option value="huggingface_local">HuggingFace (all-MiniLM-L6-v2 Local)</option>
+                </select>
               </div>
             </div>
 
             <div class="form-row">
+              <div class="form-group">
+                <label for="play-chunk-size">Chunk Size (chars)</label>
+                <input type="number" id="play-chunk-size" class="input-text" value="500" min="100" max="4000" step="50" />
+              </div>
+
+              <div class="form-group">
+                <label for="play-chunk-overlap">Chunk Overlap</label>
+                <input type="number" id="play-chunk-overlap" class="input-text" value="100" min="0" max="1000" step="20" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="play-topk">Top-K Chunks (<span id="topk-val">3</span>)</label>
+                <input type="range" id="play-topk" min="1" max="10" value="3" class="input-range" />
+              </div>
+
               <div class="form-group">
                 <label for="play-provider">LLM Provider</label>
                 <select id="play-provider" class="input-select">
@@ -90,14 +111,14 @@
                   <option value="ollama">Ollama (Local)</option>
                 </select>
               </div>
+            </div>
 
+            <div class="form-row">
               <div class="form-group">
                 <label for="play-model">Model</label>
                 <input type="text" id="play-model" class="input-text" value="gpt-4o-mini" />
               </div>
-            </div>
 
-            <div class="form-row">
               <div class="form-group">
                 <label for="play-prompt">Prompt Template</label>
                 <select id="play-prompt" class="input-select">
@@ -106,13 +127,17 @@
                   <option value="reasoning">Step-by-Step Reasoning</option>
                 </select>
               </div>
+            </div>
 
-              <div class="form-group checkbox-group">
-                <label class="switch-label">
-                  <input type="checkbox" id="play-rerank" />
-                  <span class="switch-text">Enable Reranker (Cross-Encoder)</span>
-                </label>
-              </div>
+            <div class="form-group checkbox-group" style="margin-bottom: 14px; flex-direction: row; gap: 24px;">
+              <label class="switch-label">
+                <input type="checkbox" id="play-hybrid" />
+                <span class="switch-text">Hybrid Search (Dense + BM25)</span>
+              </label>
+              <label class="switch-label">
+                <input type="checkbox" id="play-rerank" />
+                <span class="switch-text">Enable Reranker (Cross-Encoder)</span>
+              </label>
             </div>
 
             <div class="form-group query-section">
@@ -153,9 +178,131 @@
 
       <!-- TAB 2: Benchmark Runs -->
       <section id="tab-benchmarks" class="tab-pane">
-        <div class="toolbar">
+        <!-- Launch Evaluation Section -->
+        <div class="panel eval-launcher-panel">
+          <div class="launcher-header">
+            <div>
+              <h3 class="panel-header" style="margin-bottom: 2px;">⚡ Run Benchmark Evaluation</h3>
+              <p class="subtitle" style="margin-bottom: 14px;">Select evaluation scope and metrics to benchmark retriever, generator, or full end-to-end pipeline.</p>
+            </div>
+          </div>
+
+          <!-- Scope Selection (Radio cards) -->
+          <div class="scope-selection-bar">
+            <label class="scope-card active" id="scope-card-all">
+              <input type="radio" name="eval-scope" value="all" checked />
+              <div class="scope-content">
+                <span class="scope-icon">🌟</span>
+                <div>
+                  <strong>End-to-End RAG</strong>
+                  <p>Full pipeline: Retriever + Generator</p>
+                </div>
+              </div>
+            </label>
+
+            <label class="scope-card" id="scope-card-retriever">
+              <input type="radio" name="eval-scope" value="retriever_only" />
+              <div class="scope-content">
+                <span class="scope-icon">🔍</span>
+                <div>
+                  <strong>Retriever Only</strong>
+                  <p>Recall & Precision (bypasses LLM generation)</p>
+                </div>
+              </div>
+            </label>
+
+            <label class="scope-card" id="scope-card-generator">
+              <input type="radio" name="eval-scope" value="generator_only" />
+              <div class="scope-content">
+                <span class="scope-icon">🤖</span>
+                <div>
+                  <strong>Generator Only</strong>
+                  <p>Faithfulness, Relevancy & Hallucination</p>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <!-- Dynamic Metric Checkboxes Container -->
+          <div class="metrics-selection-section">
+            <h4 class="metrics-heading">Select Metrics to Benchmark</h4>
+            <div id="metrics-checkbox-container" class="metrics-checkbox-grid">
+              <!-- Dynamically populated from /api/evaluate/metrics -->
+            </div>
+          </div>
+
+          <!-- Evaluation Configuration Row -->
+          <div class="form-row" style="margin-top: 14px;">
+            <div class="form-group">
+              <label for="eval-doc">Document Corpus</label>
+              <select id="eval-doc" class="input-select"></select>
+            </div>
+            <div class="form-group">
+              <label for="eval-dataset">Evaluation Dataset</label>
+              <select id="eval-dataset" class="input-select"></select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="eval-store">Vector Store</label>
+              <select id="eval-store" class="input-select">
+                <option value="chroma" selected>Chroma DB</option>
+                <option value="faiss">FAISS</option>
+                <option value="qdrant">Qdrant</option>
+                <option value="bm25">BM25 (Keyword Search)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="eval-embeddings">Embedding Provider</label>
+              <select id="eval-embeddings" class="input-select">
+                <option value="openai" selected>OpenAI (text-embedding-3-small)</option>
+                <option value="huggingface_local">HuggingFace (all-MiniLM-L6-v2 Local)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="eval-chunk-size">Chunk Size (chars)</label>
+              <input type="number" id="eval-chunk-size" class="input-text" value="500" min="100" max="4000" step="50" />
+            </div>
+            <div class="form-group">
+              <label for="eval-chunk-overlap">Chunk Overlap</label>
+              <input type="number" id="eval-chunk-overlap" class="input-text" value="100" min="0" max="1000" step="20" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="eval-cases">Max Test Cases (<span id="eval-cases-val">2</span>)</label>
+              <input type="range" id="eval-cases" min="1" max="10" value="2" class="input-range" />
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 6px;">
+            <div class="form-group checkbox-group" style="flex-direction: row; gap: 24px;">
+              <label class="switch-label">
+                <input type="checkbox" id="eval-hybrid" />
+                <span class="switch-text">Hybrid Search (Dense + BM25 RRF)</span>
+              </label>
+              <label class="switch-label">
+                <input type="checkbox" id="eval-rerank" />
+                <span class="switch-text">Enable Cross-Encoder Reranker</span>
+              </label>
+            </div>
+          </div>
+
+          <button id="btn-start-eval" class="btn btn-primary" style="margin-top: 10px;">
+            <span id="btn-eval-text">▶️ Run Selected Benchmark</span>
+            <span id="btn-eval-spinner" class="spinner hidden"></span>
+          </button>
+          <div id="eval-status-msg" class="status-banner hidden"></div>
+        </div>
+
+        <div class="toolbar" style="margin-top: 24px;">
           <div class="toolbar-group">
-            <label for="select-run">Select Benchmark Run:</label>
+            <label for="select-run">Inspect Completed Run:</label>
             <select id="select-run" class="input-select"></select>
           </div>
           <button id="btn-refresh-runs" class="btn btn-secondary">🔄 Refresh</button>
