@@ -1,4 +1,3 @@
-import argparse
 import json
 import statistics
 import sys
@@ -39,7 +38,10 @@ def run_ops_eval(
     vector_store_type: str = "chroma",
     chunk_size: int = 500,
     chunk_overlap: int = 100,
+    embedding_provider: str = "openai",
+    splitter_type: str = "recursive",
     use_reranker: bool = False,
+    use_hybrid: bool = False,
     top_k: int = 3,
     provider: str = "openai",
     model_name: str = "gpt-4o-mini",
@@ -62,20 +64,25 @@ def run_ops_eval(
     print("\n--- Running Operations & Performance Evaluation (Ops Eval) ---")
     print(f"Document: {full_doc_path.name}")
     print(f"Vector Store: {vector_store_type}")
+    print(f"Hybrid Search: {'Enabled' if use_hybrid else 'Disabled'}")
     print(f"Reranker: {'Enabled (cross-encoder)' if use_reranker else 'Disabled'}")
     print(f"Top-K Chunks: {top_k}")
     print(f"Generator: {provider} / {model_name} (temperature: {temperature})")
     print(f"Prompt Template: {prompt_template}\n")
+    print(f"\n[Ops Benchmark] Doc: {full_doc_path.name} | Store: {vector_store_type} | Top-K: {top_k}")
 
     # 1. Build live retriever
     print("Initializing vector store and retriever...")
     t_retriever_init = time.perf_counter()
     retriever = build_retriever(
         doc_path=str(full_doc_path),
-        vector_store_type=vector_store_type,
+        splitter_type=splitter_type,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        embedding_provider=embedding_provider,
+        vector_store_type=vector_store_type,
         k=top_k,
+        use_hybrid=use_hybrid,
     )
     init_retriever_ms = round((time.perf_counter() - t_retriever_init) * 1000, 2)
     print(f"Retriever initialized in {init_retriever_ms:.2f} ms.\n")
@@ -176,9 +183,12 @@ def run_ops_eval(
             "eval_type": "operations_and_performance",
             "document": full_doc_path.name,
             "vector_store": vector_store_type,
+            "embedding_provider": embedding_provider,
+            "splitter_type": splitter_type,
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "use_reranker": use_reranker,
+            "use_hybrid": use_hybrid,
             "top_k": top_k,
             "provider": provider,
             "model_name": model_name,
@@ -270,28 +280,5 @@ def run_ops_eval(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benchmark RAG Operations & Performance (Latency, Cost & Throughput).")
-    parser.add_argument("--doc", type=str, default="docs/Facebooks-Corporate-Human-Rights-Policy.pdf", help="Document path")
-    parser.add_argument("--vector-store", type=str, default="chroma", help="Vector store (chroma, faiss, qdrant)")
-    parser.add_argument("--rerank", action="store_true", help="Enable cross-encoder reranking")
-    parser.add_argument("--top-k", type=int, default=3, help="Number of retrieved chunks")
-    parser.add_argument("--provider", type=str, default="openai", help="LLM provider (openai, deepseek, ollama)")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="LLM generator model")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
-    parser.add_argument("--prompt", type=str, default="default", help="Prompt template (default, concise, reasoning)")
-    parser.add_argument("--max-cases", type=int, default=None, help="Limit number of test cases to benchmark")
-
-    args = parser.parse_args()
-
-    run_ops_eval(
-        doc_path=args.doc,
-        vector_store_type=args.vector_store,
-        use_reranker=args.rerank,
-        top_k=args.top_k,
-        provider=args.provider,
-        model_name=args.model,
-        temperature=args.temperature,
-        prompt_template=args.prompt,
-        max_cases=args.max_cases,
-    )
+    run_ops_eval(max_cases=2)
 

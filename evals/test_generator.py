@@ -1,4 +1,3 @@
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -32,6 +31,7 @@ def run_generator_eval(
     temperature: float = 0.0,
     prompt_template: str = "default",
     max_cases: int | None = None,
+    eval_model: str = "gpt-4o-mini",
 ):
     """
     Evaluates generator quality (Faithfulness, Answer Relevancy, Hallucination)
@@ -45,6 +45,7 @@ def run_generator_eval(
     print(f"Temperature: {temperature}")
     print(f"Prompt Template: {prompt_template}")
     print("Mode: Isolated Context (Ground Truth)\n")
+    print(f"\n[Generator Eval] Model: {model_name} ({provider}) | Template: {prompt_template}")
 
     # 1. Load dataset
     with open(full_dataset_path, encoding="utf-8") as f:
@@ -85,9 +86,9 @@ def run_generator_eval(
 
     # 3. Generator Metrics
     metrics = [
-        FaithfulnessMetric(threshold=0.7, model="gpt-4o-mini", include_reason=False),
-        AnswerRelevancyMetric(threshold=0.7, model="gpt-4o-mini", include_reason=False),
-        HallucinationMetric(threshold=0.7, model="gpt-4o-mini", include_reason=False),
+        FaithfulnessMetric(threshold=0.7, model=eval_model, include_reason=False),
+        AnswerRelevancyMetric(threshold=0.7, model=eval_model, include_reason=False),
+        HallucinationMetric(threshold=0.7, model=eval_model, include_reason=False),
     ]
 
     results_dir = ROOT / "evals" / "results"
@@ -116,20 +117,5 @@ def run_generator_eval(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate RAG Generator performance in isolation.")
-    parser.add_argument("--provider", type=str, default="openai", help="LLM provider (openai, deepseek, ollama)")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="Model name")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
-    parser.add_argument("--prompt", type=str, default="default", help="Prompt template name (default, concise, reasoning)")
-    parser.add_argument("--max-cases", type=int, default=None, help="Limit number of test cases to evaluate")
-
-    args = parser.parse_args()
-
-    run_generator_eval(
-        provider=args.provider,
-        model_name=args.model,
-        temperature=args.temperature,
-        prompt_template=args.prompt,
-        max_cases=args.max_cases,
-    )
+    run_generator_eval(max_cases=2)
 

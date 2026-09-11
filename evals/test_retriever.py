@@ -28,6 +28,7 @@ def run_retriever_eval(
     chunk_overlap: int = 100,
     use_reranker: bool = False,
     top_k: int = 3,
+    eval_model: str = "gpt-4o-mini",
 ):
     """
     Evaluates Retriever Contextual Recall and Contextual Precision
@@ -42,6 +43,7 @@ def run_retriever_eval(
     print(f"Chunk Size: {chunk_size} (overlap: {chunk_overlap})")
     print(f"Reranker: {'Enabled (cross-encoder)' if use_reranker else 'Disabled'}")
     print(f"Top-K Chunks: {top_k}\n")
+    print(f"\n[Retriever Eval] Doc: {full_doc_path.name} | Store: {vector_store_type} | Top-K: {top_k}")
 
     # 1. Build retriever
     print("Building vector store and retriever...")
@@ -80,8 +82,8 @@ def run_retriever_eval(
 
     # 4. Metrics: Contextual Recall & Contextual Precision
     metrics = [
-        ContextualRecallMetric(threshold=0.7, model="gpt-4o-mini", include_reason=False),
-        ContextualPrecisionMetric(threshold=0.7, model="gpt-4o-mini", include_reason=False),
+        ContextualRecallMetric(threshold=0.7, model=eval_model, include_reason=False),
+        ContextualPrecisionMetric(threshold=0.7, model=eval_model, include_reason=False),
     ]
 
     results_dir = ROOT / "evals" / "results"
@@ -110,7 +112,5 @@ def run_retriever_eval(
 
 
 if __name__ == "__main__":
-    # Check for optional CLI flag: --rerank
-    use_reranker = "--rerank" in sys.argv
-    run_retriever_eval(use_reranker=use_reranker)
+    run_retriever_eval()
 
