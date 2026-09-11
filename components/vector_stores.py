@@ -28,9 +28,19 @@ def create_chroma_store(
     **kwargs,
 ) -> Chroma:
     """
-    Creates or updates a persistent Chroma vector store.
+    Creates or rebuilds a persistent Chroma vector store.
+    If the collection already exists in Chroma, it is deleted first to prevent
+    duplicate document appending on rebuilds.
     """
     target_dir = str(persist_directory or CHROMA_DIR)
+    try:
+        client = chromadb.PersistentClient(path=target_dir)
+        existing_cols = [c.name if hasattr(c, "name") else str(c) for c in client.list_collections()]
+        if collection_name in existing_cols:
+            client.delete_collection(name=collection_name)
+    except Exception:
+        pass
+
     return Chroma.from_documents(
         documents=documents,
         embedding=embeddings,
@@ -73,8 +83,18 @@ def create_qdrant_store(
 ) -> QdrantVectorStore:
     """
     Creates an embedded Qdrant vector store on local disk (no Docker required).
+    If the collection already exists, it is deleted first to prevent duplicate points on rebuilds.
     """
     target_path = str(path or QDRANT_DIR)
+    try:
+        from qdrant_client import QdrantClient
+        client = QdrantClient(path=target_path)
+        existing = [c.name for c in client.get_collections().collections]
+        if collection_name in existing:
+            client.delete_collection(collection_name=collection_name)
+    except Exception:
+        pass
+
     return QdrantVectorStore.from_documents(
         documents=documents,
         embedding=embeddings,

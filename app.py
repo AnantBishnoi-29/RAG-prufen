@@ -430,10 +430,12 @@ def trigger_eval_run(req: EvalRunRequest):
             scope=req.scope,
             selected_metrics=req.selected_metrics,
         )
+        filename = run_result.get("file") if isinstance(run_result, dict) else None
         return {
             "status": "success",
             "message": f"Evaluation [{req.scope}] finished successfully.",
             "scope": req.scope,
+            "filename": filename,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")

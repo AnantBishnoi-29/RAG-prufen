@@ -2,8 +2,6 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from prompts import DEFAULT_QA_PROMPT
 from prompts import get_prompt_template
 
 load_dotenv()

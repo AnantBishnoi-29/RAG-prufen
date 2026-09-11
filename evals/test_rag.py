@@ -33,13 +33,6 @@ from components.generator import generate_answer
 from components.retriever import build_retriever, retrieve_contexts
 from deepeval.evaluate import evaluate
 from deepeval.evaluate.configs import DisplayConfig
-from deepeval.metrics import (
-    AnswerRelevancyMetric,
-    ContextualPrecisionMetric,
-    ContextualRecallMetric,
-    FaithfulnessMetric,
-    HallucinationMetric,
-)
 from deepeval.test_case import LLMTestCase
 from evals.registry import build_selected_metrics
 
@@ -93,8 +86,6 @@ def run_rag_eval(
         eval_model=eval_model,
     )
 
-    # Determine if answer generation is required
-    generator_metric_names = {"FaithfulnessMetric", "AnswerRelevancyMetric", "HallucinationMetric"}
     # Determine if answer generation is required (all generator and safety metrics require model output)
     generator_metric_names = {
         "FaithfulnessMetric",
@@ -105,18 +96,6 @@ def run_rag_eval(
     }
     has_generator_metrics = any(m.__class__.__name__ in generator_metric_names for m in deepeval_metrics)
     needs_generation = (scope != "retriever_only") and has_generator_metrics
-
-    print("\n==========================================")
-    print(f"   Running RAG Evaluation [{scope.upper()}]  ")
-    print("==========================================")
-    print(f"Document:           {full_doc_path.name}")
-    print(f"Dataset:            {full_dataset_path.name}")
-    print(f"Evaluation Scope:   {scope}")
-    print(f"Needs Generation:   {needs_generation} ({'Calling LLM' if needs_generation else 'Skipping LLM'})")
-    print(f"Active DeepEval:    {[m.__class__.__name__ for m in deepeval_metrics]}")
-    print(f"Active Ops Metrics: {list(active_ops)}\n")
-    print(f"\n[RAG Eval] Scope: {scope.upper()} | Doc: {full_doc_path.name} | Dataset: {full_dataset_path.name}")
-    print(f"[RAG Eval] LLM Generation: {'Active' if needs_generation else 'Bypassed'} | DeepEval: {[m.__class__.__name__ for m in deepeval_metrics]}")
 
     # 2. Build retriever (needed for all and retriever_only)
     retriever = None
@@ -243,11 +222,7 @@ def run_rag_eval(
                 retrieval_context=retrieved_chunks,
             )
         )
-        gen_status = "Generated answer" if needs_generation else "Skipped answer generation"
-        print(f"  [{i}/{len(goldens)}] Retrieved {len(retrieved_chunks)} chunk(s) | {gen_status}")
-        gen_status = f"Generated in {gen_ms:.0f}ms (${c_usd:.5f})" if needs_generation else "Skipped LLM"
-        print(f"  [{i}/{len(goldens)}] Ret: {retrieval_ms:.0f}ms | {gen_status}")
-
+      
     # 5. Execute Evaluation with DeepEval
     # 5. Compute Aggregated Ops & Latency Metrics
     n_queries = len(goldens)
@@ -298,7 +273,6 @@ def run_rag_eval(
     existing_runs = set(results_dir.glob("*.json"))
 
     hyperparams = {
-        "eval_type": f"{scope}_eval",
         "eval_type": f"rag_eval_{scope}",
         "scope": scope,
         "vector_store": vector_store_type if scope != "generator_only" else "none",
@@ -353,7 +327,10 @@ def run_rag_eval(
             except Exception as ex:
                 print(f"[Warning] Could not enrich run file with ops data: {ex}")
 
-        return eval_result
+        return {
+            "file": target_file.name if target_file else None,
+            "eval_result": eval_result,
+        }
     else:
         print("\nNo DeepEval metrics selected. Saving ops & test case execution summary.")
         timestamp_slug = int(time.time())

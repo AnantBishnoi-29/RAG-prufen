@@ -208,7 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function loadRuns() {
+  async function loadRuns(selectedFilename = null) {
     try {
       const res = await fetch("/api/results");
       const runs = await res.json();
@@ -237,10 +237,13 @@ document.addEventListener("DOMContentLoaded", () => {
         compareRunB.selectedIndex = 1;
       }
 
-      // Automatically load the latest run
-      if (runs.length > 0) {
-        loadRunDetail(runs[0].filename);
-      }
+      // Determine target run: exact requested file if found, otherwise the first run
+      const targetRun = (selectedFilename && runs.some(r => r.filename === selectedFilename))
+        ? selectedFilename
+        : runs[0].filename;
+
+      selectRun.value = targetRun;
+      loadRunDetail(targetRun);
     } catch (err) {
       console.error("Failed to load runs:", err);
     }
@@ -280,6 +283,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // =========================================================================
   // 2. Playground: Live Query
   // =========================================================================
+  const defaultProviderModels = {
+    openai: "gpt-4o-mini",
+    deepseek: "deepseek-chat",
+    ollama: "llama3"
+  };
+
+  if (playProviderSelect && playModelInput) {
+    playProviderSelect.addEventListener("change", (e) => {
+      const selectedProvider = e.target.value;
+      if (defaultProviderModels[selectedProvider]) {
+        playModelInput.value = defaultProviderModels[selectedProvider];
+      }
+    });
+  }
+
   btnRunQuery.addEventListener("click", async () => {
     const query = playQueryText.value.trim();
     if (!query) {
@@ -606,8 +624,8 @@ document.addEventListener("DOMContentLoaded", () => {
         evalStatusMsg.textContent = `🎉 ${data.message || "Benchmark evaluation completed successfully!"}`;
         evalStatusMsg.classList.remove("hidden");
 
-        // Reload runs list so the new evaluation run is loaded and displayed immediately
-        await loadRuns();
+        // Reload runs list and select the newly generated benchmark run
+        await loadRuns(data.filename);
       } catch (err) {
         evalStatusMsg.className = "status-banner error";
         evalStatusMsg.textContent = `❌ ${err.message}`;
@@ -992,11 +1010,15 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
     comparisonBody.appendChild(trDur);
 
-    const costA = runA.evaluationCost !== undefined ? runA.evaluationCost : runA.cost_metrics?.total_cost_usd;
-    const costB = runB.evaluationCost !== undefined ? runB.evaluationCost : runB.cost_metrics?.total_cost_usd;
-    if (costA !== undefined || costB !== undefined) {
-      const costAStr = costA !== undefined ? `$${costA.toFixed(5)}` : "N/A";
-      const costBStr = costB !== undefined ? `$${costB.toFixed(5)}` : "N/A";
+    const costA = (runA.evaluationCost !== null && runA.evaluationCost !== undefined)
+      ? runA.evaluationCost
+      : runA.cost_metrics?.total_cost_usd;
+    const costB = (runB.evaluationCost !== null && runB.evaluationCost !== undefined)
+      ? runB.evaluationCost
+      : runB.cost_metrics?.total_cost_usd;
+    if ((costA !== null && costA !== undefined) || (costB !== null && costB !== undefined)) {
+      const costAStr = typeof costA === "number" ? `$${costA.toFixed(5)}` : "N/A";
+      const costBStr = typeof costB === "number" ? `$${costB.toFixed(5)}` : "N/A";
       let costDelta = "-";
       if (typeof costA === "number" && typeof costB === "number" && costA > 0) {
         const pct = ((costB - costA) / costA) * 100;
