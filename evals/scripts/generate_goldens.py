@@ -13,11 +13,11 @@ Features:
 import json
 import math
 from pathlib import Path
-import re
 import sys
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
 # Ensure UTF-8 output on Windows terminals
 if sys.platform == "win32":
@@ -83,48 +83,31 @@ def sample_chunks(
         raise ValueError(f"Unsupported sampling strategy: '{strategy}'. Choose from: 'stride', 'head_tail', 'all'.")
 
 
-def parse_llm_json(raw_text: str) -> dict[str, str]:
-    """Extracts and parses JSON object from LLM response with cleanup."""
-    text = raw_text.strip()
+class SynthesizedQA(BaseModel):
+    """Structured schema for synthetic Question-Answer pairs extracted from context."""
 
-    # Strip markdown fences if present
-    if "```json" in text:
-        text = text.split("```json", 1)[1].split("```", 1)[0].strip()
-    elif "```" in text:
-        text = text.split("```", 1)[1].split("```", 1)[0].strip()
+    question: str = Field(
+        ...,
+        description="A clear, realistic question testing factual understanding of the context excerpt, adhering to user styling.",
+    )
+    expected_answer: str = Field(
+        ...,
+        description="A comprehensive, accurate, and factually grounded expected answer based strictly on the excerpt.",
+    )
 
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return {
-                "question": str(data.get("question", "")).strip(),
-                "expected_answer": str(data.get("expected_answer", "")).strip(),
-            }
-    except json.JSONDecodeError:
-        pass
 
-    # Regex fallback if JSON decoding fails
-    q_match = re.search(r'"question"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', text)
-    a_match = re.search(r'"expected_answer"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', text)
-
-    question = q_match.group(1).encode().decode("unicode_escape") if q_match else ""
-    expected_answer = a_match.group(1).encode().decode("unicode_escape") if a_match else ""
-
-    if not question or not expected_answer:
-        raise ValueError(f"Failed to parse question and expected_answer from LLM response: {raw_text[:200]}...")
-
-    return {"question": question, "expected_answer": expected_answer}
+DEFAULT_INSTRUCTION = (
+    "Generate a clear, realistic question and comprehensive answer testing factual understanding of this excerpt."
+)
 
 
 def generate_golden_dataset(
     doc_path: str = str(ROOT / "docs" / "Facebooks-Corporate-Human-Rights-Policy.pdf"),
-    pdf_path: str | None = None,  # alias for backward compatibility
     instructions: list[str] | str | None = None,
     output_path: str | None = None,
     output_dir: str = str(ROOT / "evals" / "datasets"),
     output_file: str = "golden_dataset",
     max_goldens: int = 10,
-    max_goldens_per_context: int | None = None,  # alias for backward compatibility
     chunk_size: int = 1000,
     chunk_overlap: int = 150,
     sample_strategy: str = "stride",
@@ -138,13 +121,11 @@ def generate_golden_dataset(
 
     Parameters:
     - doc_path: Path to source document (PDF, TXT, MD, or folder).
-    - pdf_path: Optional alias for doc_path (for backward compatibility).
     - instructions: One or more user styling prompts / instructions.
     - output_path: Exact destination JSON file path (overrides output_dir / output_file).
     - output_dir: Directory to save generated dataset.
     - output_file: Base filename if output_path is not specified.
     - max_goldens: Total target number of QA pairs to generate.
-    - max_goldens_per_context: Optional alias for backward compatibility.
     - chunk_size: Chunk size in characters.
     - chunk_overlap: Overlap between consecutive chunks.
     - sample_strategy: 'stride' (uniform), 'head_tail', or 'all'.
@@ -153,20 +134,14 @@ def generate_golden_dataset(
     - temperature: Sampling temperature.
     - enable_checkpoint: Whether to save intermediate progress and resume on failure.
     """
-    actual_doc_path = pdf_path if pdf_path is not None else doc_path
-    if max_goldens_per_context is not None and max_goldens == 10:
-        max_goldens = max_goldens_per_context * 2
-
-    if instructions is None:
-        user_instructions = [
-            "Generate a clear, realistic question and comprehensive answer testing factual understanding of this excerpt."
-        ]
+    if not instructions:
+        user_instructions = [DEFAULT_INSTRUCTION]
     elif isinstance(instructions, str):
-        user_instructions = [instructions]
+        clean = instructions.strip()
+        user_instructions = [clean] if clean else [DEFAULT_INSTRUCTION]
     else:
-        user_instructions = [inst for inst in instructions if inst and inst.strip()]
-        if not user_instructions:
-            user_instructions = ["Generate a clear question and factual answer based strictly on the excerpt."]
+        valid = [inst.strip() for inst in instructions if inst and inst.strip()]
+        user_instructions = valid if valid else [DEFAULT_INSTRUCTION]
 
     if output_path:
         final_output_path = Path(output_path).resolve()
@@ -197,7 +172,7 @@ def generate_golden_dataset(
         return completed_goldens[:max_goldens]
 
     # 2. Load and chunk source document
-    raw_docs = load_documents(actual_doc_path)
+    raw_docs = load_documents(doc_path)
     print(f"Splitting documents (chunk_size={chunk_size}, chunk_overlap={chunk_overlap})...")
     chunks = split_documents(
         raw_docs,
@@ -215,12 +190,13 @@ def generate_golden_dataset(
     )
     print(f"Sampled {len(sampled)} chunks using strategy '{sample_strategy}'.")
 
-    # 4. Initialize LLM
+    # 4. Initialize LLM with structured output
     print(f"Initializing LLM generator ({provider}: {model_name}, temp={temperature})...")
-    llm = get_llm(provider=provider, model_name=model_name, temperature=temperature)
+    base_llm = get_llm(provider=provider, model_name=model_name, temperature=temperature)
+    structured_llm = base_llm.with_structured_output(SynthesizedQA)
 
     # 5. Generate Goldens
-    doc_filename = Path(actual_doc_path).name
+    doc_filename = Path(doc_path).name
     start_index = len(completed_goldens)
 
     print(f"\n🚀 Starting QA generation: {len(sampled) - start_index} pair(s) remaining...")
@@ -241,13 +217,25 @@ def generate_golden_dataset(
         ]
 
         try:
-            response = llm.invoke(messages)
-            parsed = parse_llm_json(response.content)
+            qa_pair = structured_llm.invoke(messages)
+
+            # In rare provider variations, output might be a dict needing validation
+            if isinstance(qa_pair, dict):
+                qa_pair = SynthesizedQA.model_validate(qa_pair)
+
+            if not isinstance(qa_pair, SynthesizedQA):
+                raise ValueError(f"Unexpected output type from structured LLM: {type(qa_pair)}")
+
+            question = qa_pair.question.strip()
+            expected_answer = qa_pair.expected_answer.strip()
+
+            if not question or not expected_answer:
+                raise ValueError("Generated question or expected_answer is empty.")
 
             golden_item: dict[str, Any] = {
-                "input": parsed["question"],
+                "input": question,
                 "actual_output": None,
-                "expected_output": parsed["expected_answer"],
+                "expected_output": expected_answer,
                 "context": [chunk.page_content],
                 "source_file": doc_filename,
                 "metadata": {
@@ -260,7 +248,7 @@ def generate_golden_dataset(
 
             print(
                 f"  [{len(completed_goldens)}/{len(sampled)}] Question: "
-                f"{parsed['question'][:75]}..."
+                f"{question[:75]}..."
             )
 
             # Checkpoint after each successful pair
