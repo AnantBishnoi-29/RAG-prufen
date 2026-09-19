@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
 from components.generator import generate_answer
 from components.retriever import build_retriever, retrieve, retrieve_contexts
 from evals.scripts.generate_goldens import generate_golden_dataset
+from prompts import SYNTHESIS_SYSTEM_PROMPT, get_all_qa_presets
 
 load_dotenv()
 
@@ -62,7 +63,14 @@ async def serve_index():
     index_file = ROOT / "web" / "index.html"
     if not index_file.exists():
         raise HTTPException(status_code=404, detail="Frontend index.html not found.")
-    return FileResponse(str(index_file))
+    return FileResponse(
+        str(index_file),
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +200,18 @@ def get_dataset_detail(filename: str):
 
 
 # ---------------------------------------------------------------------------
+# API: Prompt Presets & Templates
+# ---------------------------------------------------------------------------
+@app.get("/api/prompts/templates")
+def get_prompt_templates():
+    """Returns available QA prompt presets and default synthesis prompts."""
+    return {
+        "presets": get_all_qa_presets(),
+        "synthesis_system_prompt": SYNTHESIS_SYSTEM_PROMPT,
+    }
+
+
+# ---------------------------------------------------------------------------
 # API: Live Playground Query Execution
 # ---------------------------------------------------------------------------
 class QueryRequest(BaseModel):
@@ -201,11 +221,13 @@ class QueryRequest(BaseModel):
     chunk_size: int = 500
     chunk_overlap: int = 100
     embedding_provider: str = "openai"
+    loader_type: str = "auto"
     splitter_type: str = "recursive"
     top_k: int = 3
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     prompt_template: str = "default"
+    system_prompt: str | None = None
     use_reranker: bool = False
     use_hybrid: bool = False
     temperature: float = 0.0
@@ -239,6 +261,7 @@ def run_playground_query(req: QueryRequest):
         t0 = time.perf_counter()
         retriever = build_retriever(
             doc_path=str(full_doc_path),
+            loader_type=req.loader_type,
             splitter_type=req.splitter_type,
             chunk_size=req.chunk_size,
             chunk_overlap=req.chunk_overlap,
@@ -265,6 +288,7 @@ def run_playground_query(req: QueryRequest):
             model_name=req.model_name,
             temperature=req.temperature,
             prompt_template=req.prompt_template,
+            system_prompt=req.system_prompt,
         )
         t2 = time.perf_counter()
 
@@ -305,6 +329,7 @@ def run_playground_query(req: QueryRequest):
             "metadata": {
                 "vector_store": req.vector_store,
                 "embedding_provider": req.embedding_provider,
+                "loader_type": req.loader_type,
                 "splitter_type": req.splitter_type,
                 "chunk_size": req.chunk_size,
                 "chunk_overlap": req.chunk_overlap,
@@ -325,9 +350,12 @@ def run_playground_query(req: QueryRequest):
 # ---------------------------------------------------------------------------
 class GoldenGenRequest(BaseModel):
     doc_path: str = "docs/Facebooks-Corporate-Human-Rights-Policy.pdf"
+    system_prompt: str | None = None
     instruction: str = "Generate clear, representative questions and answers."
     max_goldens: int = 5
     sample_strategy: str = "stride"
+    loader_type: str = "auto"
+    splitter_type: str = "recursive"
     output_file: str = "custom_goldens.json"
 
 
@@ -344,10 +372,13 @@ def trigger_golden_generation(req: GoldenGenRequest):
     try:
         goldens = generate_golden_dataset(
             doc_path=str(full_doc_path),
+            system_prompt=req.system_prompt,
             instructions=[req.instruction],
             output_path=str(out_path),
             max_goldens=req.max_goldens,
             sample_strategy=req.sample_strategy,
+            loader_type=req.loader_type,
+            splitter_type=req.splitter_type,
         )
         return {
             "status": "success",
@@ -378,6 +409,7 @@ class EvalRunRequest(BaseModel):
     chunk_size: int = 500
     chunk_overlap: int = 100
     embedding_provider: str = "openai"
+    loader_type: str = "auto"
     splitter_type: str = "recursive"
     use_reranker: bool = False
     use_hybrid: bool = False
@@ -386,6 +418,7 @@ class EvalRunRequest(BaseModel):
     model_name: str = "gpt-4o-mini"
     temperature: float = 0.0
     prompt_template: str = "default"
+    system_prompt: str | None = None
     eval_model: str = "gpt-4o-mini"
     max_cases: int = 2
     scope: str = "all"  # "all", "retriever_only", "generator_only"
@@ -417,6 +450,7 @@ def trigger_eval_run(req: EvalRunRequest):
             chunk_size=req.chunk_size,
             chunk_overlap=req.chunk_overlap,
             embedding_provider=req.embedding_provider,
+            loader_type=req.loader_type,
             splitter_type=req.splitter_type,
             use_reranker=req.use_reranker,
             use_hybrid=req.use_hybrid,
@@ -425,6 +459,7 @@ def trigger_eval_run(req: EvalRunRequest):
             model_name=req.model_name,
             temperature=req.temperature,
             prompt_template=req.prompt_template,
+            system_prompt=req.system_prompt,
             max_cases=req.max_cases,
             eval_model=req.eval_model,
             scope=req.scope,
