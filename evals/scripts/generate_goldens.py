@@ -108,12 +108,15 @@ def generate_golden_dataset(
     output_dir: str = str(ROOT / "evals" / "datasets"),
     output_file: str = "golden_dataset",
     max_goldens: int = 10,
+    loader_type: int | str = "auto",
+    splitter_type: str = "recursive",
     chunk_size: int = 1000,
     chunk_overlap: int = 150,
     sample_strategy: str = "stride",
     provider: str = "openai",
     model_name: str = "gpt-4o-mini",
     temperature: float = 0.3,
+    system_prompt: str | None = None,
     enable_checkpoint: bool = True,
 ) -> list[dict[str, Any]]:
     """
@@ -126,12 +129,15 @@ def generate_golden_dataset(
     - output_dir: Directory to save generated dataset.
     - output_file: Base filename if output_path is not specified.
     - max_goldens: Total target number of QA pairs to generate.
-    - chunk_size: Chunk size in characters.
+    - loader_type: Document loader to use ('auto', 'pypdf', 'text', 'pypdf_directory').
+    - splitter_type: Text splitter type ('recursive', 'character', 'token').
+    - chunk_size: Chunk size in characters (or tokens if token splitter).
     - chunk_overlap: Overlap between consecutive chunks.
     - sample_strategy: 'stride' (uniform), 'head_tail', or 'all'.
     - provider: LLM provider ('openai', 'deepseek', 'ollama').
     - model_name: Name of the model.
     - temperature: Sampling temperature.
+    - system_prompt: Optional custom system prompt overriding default SYNTHESIS_SYSTEM_PROMPT.
     - enable_checkpoint: Whether to save intermediate progress and resume on failure.
     """
     if not instructions:
@@ -172,11 +178,11 @@ def generate_golden_dataset(
         return completed_goldens[:max_goldens]
 
     # 2. Load and chunk source document
-    raw_docs = load_documents(doc_path)
-    print(f"Splitting documents (chunk_size={chunk_size}, chunk_overlap={chunk_overlap})...")
+    raw_docs = load_documents(doc_path, choice=loader_type)
+    print(f"Splitting documents with {splitter_type} (chunk_size={chunk_size}, chunk_overlap={chunk_overlap})...")
     chunks = split_documents(
         raw_docs,
-        splitter_type="recursive",
+        splitter_type=splitter_type,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
@@ -211,8 +217,10 @@ def generate_golden_dataset(
             context=chunk.page_content,
         )
 
+        effective_sys = system_prompt.strip() if system_prompt and system_prompt.strip() else SYNTHESIS_SYSTEM_PROMPT
         messages = [
             SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),
+            SystemMessage(content=effective_sys),
             HumanMessage(content=prompt_content),
         ]
 
