@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import chromadb
 from pathlib import Path
 import pickle
-from typing import Literal
+import threading
+from typing import Any, Literal
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import FAISS
@@ -20,6 +22,39 @@ CHROMA_DIR = DATABASES_DIR / "chroma"
 FAISS_DIR = DATABASES_DIR / "faiss"
 QDRANT_DIR = DATABASES_DIR / "qdrant"
 BM25_DIR = DATABASES_DIR / "bm25"
+
+# Process-wide singleton cache for embedded Qdrant clients to avoid storage folder locking errors
+_QDRANT_CLIENT_CACHE: dict[str, Any] = {}
+_qdrant_lock = threading.Lock()
+
+
+def get_qdrant_client(path: Path | str | None = None):
+    """
+    Returns a process-wide singleton QdrantClient instance for the given storage path.
+    Reusing the embedded client prevents 'Storage folder is already accessed by another instance'
+    file-lock collisions across queries and evaluation runs in the same process.
+    """
+    from qdrant_client import QdrantClient
+
+    target_path = str(Path(path or QDRANT_DIR).resolve())
+    with _qdrant_lock:
+        if target_path not in _QDRANT_CLIENT_CACHE:
+            _QDRANT_CLIENT_CACHE[target_path] = QdrantClient(path=target_path)
+        return _QDRANT_CLIENT_CACHE[target_path]
+
+
+def close_qdrant_clients():
+    """Cleanly closes any cached QdrantClient instances to release folder locks."""
+    with _qdrant_lock:
+        for p, client in list(_QDRANT_CLIENT_CACHE.items()):
+            try:
+                client.close()
+            except Exception:
+                pass
+        _QDRANT_CLIENT_CACHE.clear()
+
+
+atexit.register(close_qdrant_clients)
 
 
 def create_chroma_store(
@@ -85,25 +120,51 @@ def create_qdrant_store(
 ) -> QdrantVectorStore:
     """
     Creates an embedded Qdrant vector store on local disk (no Docker required).
-    If the collection already exists, it is deleted first to prevent duplicate points on rebuilds.
+    Reuses the singleton QdrantClient to prevent file-locking conflicts.
+    If the collection already exists, it is deleted and recreated to prevent duplicate points on rebuilds.
     """
-    target_path = str(path or QDRANT_DIR)
+    from qdrant_client import models
+
+    target_path = Path(path or QDRANT_DIR).resolve()
+    target_path.mkdir(parents=True, exist_ok=True)
+    client = get_qdrant_client(target_path)
+
     try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(path=target_path)
-        existing = [c.name for c in client.get_collections().collections]
-        if collection_name in existing:
+        if client.collection_exists(collection_name=collection_name):
             client.delete_collection(collection_name=collection_name)
     except Exception:
         pass
 
-    return QdrantVectorStore.from_documents(
-        documents=documents,
-        embedding=embeddings,
-        path=target_path,
+    # Measure embedding dimension with probe query
+    sample_emb = embeddings.embed_query("dimension_probe")
+    dim = len(sample_emb)
+
+    client.create_collection(
         collection_name=collection_name,
-        **kwargs,
+        vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
     )
+
+    valid_keys = {
+        "retrieval_mode",
+        "vector_name",
+        "content_payload_key",
+        "metadata_payload_key",
+        "distance",
+        "sparse_embedding",
+        "sparse_vector_name",
+        "validate_embeddings",
+        "validate_collection_config",
+    }
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+
+    vector_store = QdrantVectorStore(
+        client=client,
+        collection_name=collection_name,
+        embedding=embeddings,
+        **filtered_kwargs,
+    )
+    vector_store.add_documents(documents)
+    return vector_store
 
 
 def create_bm25_retriever(
@@ -200,14 +261,12 @@ def qdrant_store_exists(
     path: Path | str | None = None,
 ) -> bool:
     """Checks if a local Qdrant collection exists and has points."""
-    target_path = str(path or QDRANT_DIR)
-    if not Path(target_path).exists():
+    target_path = Path(path or QDRANT_DIR).resolve()
+    if not target_path.exists():
         return False
     try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(path=target_path)
-        existing = [c.name for c in client.get_collections().collections]
-        if collection_name in existing:
+        client = get_qdrant_client(target_path)
+        if client.collection_exists(collection_name=collection_name):
             return client.count(collection_name=collection_name).count > 0
         return False
     except Exception:
@@ -286,13 +345,28 @@ def load_qdrant_store(
     path: Path | str | None = None,
     **kwargs,
 ) -> QdrantVectorStore:
-    """Mounts an existing embedded Qdrant collection from disk."""
-    target_path = str(path or QDRANT_DIR)
-    return QdrantVectorStore.from_existing_collection(
-        embedding=embeddings,
+    """Mounts an existing embedded Qdrant collection from disk using the singleton client."""
+    target_path = Path(path or QDRANT_DIR).resolve()
+    client = get_qdrant_client(target_path)
+
+    valid_keys = {
+        "retrieval_mode",
+        "vector_name",
+        "content_payload_key",
+        "metadata_payload_key",
+        "distance",
+        "sparse_embedding",
+        "sparse_vector_name",
+        "validate_embeddings",
+        "validate_collection_config",
+    }
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+
+    return QdrantVectorStore(
+        client=client,
         collection_name=collection_name,
-        path=target_path,
-        **kwargs,
+        embedding=embeddings,
+        **filtered_kwargs,
     )
 
 
