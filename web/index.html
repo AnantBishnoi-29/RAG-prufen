@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RAG Evaluation Suite - Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=25" />
+  <link rel="stylesheet" href="/static/style.css?v=26" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -67,6 +68,27 @@
 
             <div class="form-row">
               <div class="form-group">
+                <label for="play-loader">Document Loader</label>
+                <select id="play-loader" class="input-select">
+                  <option value="auto" selected>Auto Detect (PDF, TXT, MD, Dir)</option>
+                  <option value="pypdf">PyPDF (Single PDF)</option>
+                  <option value="text">Text / Markdown</option>
+                  <option value="pypdf_directory">Directory (All PDFs)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="play-splitter">Text Splitter</label>
+                <select id="play-splitter" class="input-select">
+                  <option value="recursive" selected>Recursive Character</option>
+                  <option value="character">Character Splitter</option>
+                  <option value="token">Token Splitter</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
                 <label for="play-store">Vector Store</label>
                 <select id="play-store" class="input-select">
                   <option value="chroma" selected>Chroma DB</option>
@@ -120,12 +142,29 @@
               </div>
 
               <div class="form-group">
-                <label for="play-prompt">Prompt Template</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label for="play-prompt" style="margin-bottom: 0;">Prompt Preset</label>
+                  <button type="button" id="btn-toggle-prompts" class="btn-text-action">
+                    🔼 Collapse System Prompt
+                  </button>
+                </div>
                 <select id="play-prompt" class="input-select">
                   <option value="default" selected>Default Grounded</option>
                   <option value="concise">Concise & Direct</option>
                   <option value="reasoning">Step-by-Step Reasoning</option>
+                  <option value="custom">Custom (User Defined)</option>
                 </select>
+              </div>
+            </div>
+
+            <!-- System Prompt Editor Panel -->
+            <div id="prompts-editor-container" class="prompt-editor-box">
+              <div class="form-group" style="margin-bottom: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <label for="play-system-prompt" style="margin-bottom: 0;">System Prompt</label>
+                  <span class="tag-badge">System Directive</span>
+                </div>
+                <textarea id="play-system-prompt" class="input-textarea prompt-textarea" rows="4" placeholder="Define the AI assistant persona and rules...">You are a helpful assistant. Answer the question using ONLY the provided context. If the answer cannot be found in the context, say "I don't have enough information to answer that."</textarea>
               </div>
             </div>
 
@@ -245,6 +284,26 @@
 
           <div class="form-row">
             <div class="form-group">
+              <label for="eval-loader">Document Loader</label>
+              <select id="eval-loader" class="input-select">
+                <option value="auto" selected>Auto Detect (PDF, TXT, MD, Dir)</option>
+                <option value="pypdf">PyPDF (Single PDF)</option>
+                <option value="text">Text / Markdown</option>
+                <option value="pypdf_directory">Directory (All PDFs)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="eval-splitter">Text Splitter</label>
+              <select id="eval-splitter" class="input-select">
+                <option value="recursive" selected>Recursive Character</option>
+                <option value="character">Character Splitter</option>
+                <option value="token">Token Splitter</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
               <label for="eval-store">Vector Store</label>
               <select id="eval-store" class="input-select">
                 <option value="chroma" selected>Chroma DB</option>
@@ -277,6 +336,48 @@
             <div class="form-group">
               <label for="eval-cases">Max Test Cases (<span id="eval-cases-val">2</span>)</label>
               <input type="range" id="eval-cases" min="1" max="10" value="2" class="input-range" />
+            </div>
+
+            <div class="form-group">
+              <label for="eval-provider">LLM Provider</label>
+              <select id="eval-provider" class="input-select">
+                <option value="openai" selected>OpenAI</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="ollama">Ollama (Local)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row" id="eval-generator-config-row">
+            <div class="form-group">
+              <label for="eval-model">Model</label>
+              <input type="text" id="eval-model" class="input-text" value="gpt-4o-mini" placeholder="e.g. gpt-4o-mini, deepseek-chat, llama3" />
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="eval-prompt" style="margin-bottom: 0;">Prompt Preset</label>
+                <button type="button" id="btn-toggle-eval-prompts" class="btn-text-action">
+                  🔼 Collapse System Prompt
+                </button>
+              </div>
+              <select id="eval-prompt" class="input-select">
+                <option value="default" selected>Default Grounded</option>
+                <option value="concise">Concise & Direct</option>
+                <option value="reasoning">Step-by-Step Reasoning</option>
+                <option value="custom">Custom (User Defined)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Benchmark System Prompt Editor Panel -->
+          <div id="eval-prompts-editor-container" class="prompt-editor-box">
+            <div class="form-group" style="margin-bottom: 0;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label for="eval-system-prompt" style="margin-bottom: 0;">System Prompt</label>
+                <span class="tag-badge">System Directive</span>
+              </div>
+              <textarea id="eval-system-prompt" class="input-textarea prompt-textarea" rows="4" placeholder="Define the AI assistant persona and rules for this benchmark...">You are a helpful assistant. Answer the question using ONLY the provided context. If the answer cannot be found in the context, say "I don't have enough information to answer that."</textarea>
             </div>
           </div>
 
@@ -387,6 +488,34 @@
               <select id="gen-doc" class="input-select"></select>
             </div>
 
+            <div class="form-row">
+              <div class="form-group">
+                <label for="gen-loader">Document Loader</label>
+                <select id="gen-loader" class="input-select">
+                  <option value="auto" selected>Auto Detect (PDF, TXT, MD, Dir)</option>
+                  <option value="pypdf">PyPDF (Single PDF)</option>
+                  <option value="text">Text / Markdown</option>
+                  <option value="pypdf_directory">Directory (All PDFs)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="gen-splitter">Text Splitter</label>
+                <select id="gen-splitter" class="input-select">
+                  <option value="recursive" selected>Recursive Character</option>
+                  <option value="character">Character Splitter</option>
+                  <option value="token">Token Splitter</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label for="gen-system-prompt" style="margin-bottom: 0;">System Prompt</label>
+                <span class="tag-badge">Synthesizer Persona</span>
+              </div>
+              <textarea id="gen-system-prompt" class="input-textarea prompt-textarea" rows="3" placeholder="Default dataset synthesizer system prompt...">You are a meticulous and rigorous AI data synthesis engine designed to create ground-truth evaluation datasets for enterprise RAG systems.</textarea>
+            </div>
+
             <div class="form-group">
               <label for="gen-instruction">Custom User Instruction / Persona</label>
               <textarea id="gen-instruction" class="input-textarea" rows="3" placeholder="e.g. Act as a strict academic examiner testing precise definitions and prerequisites."></textarea>
@@ -451,7 +580,8 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=25"></script>
+  <script src="/static/app.js?v=26"></script>
 </body>
 </html>
 

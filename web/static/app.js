@@ -3,7 +3,7 @@
  * No dependencies, no build tools, standard ES6+.
  */
 
-document.addEventListener("DOMContentLoaded", () => {
+function initApp() {
   // --- Element Selectors ---
   const navButtons = document.querySelectorAll(".nav-btn");
   const tabPanes = document.querySelectorAll(".tab-pane");
@@ -12,12 +12,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Playground Elements
   const playDocSelect = document.getElementById("play-doc");
+  const playLoaderSelect = document.getElementById("play-loader");
+  const playSplitterSelect = document.getElementById("play-splitter");
   const playStoreSelect = document.getElementById("play-store");
   const playTopkRange = document.getElementById("play-topk");
   const playTopkVal = document.getElementById("topk-val");
   const playProviderSelect = document.getElementById("play-provider");
   const playModelInput = document.getElementById("play-model");
   const playPromptSelect = document.getElementById("play-prompt");
+  const btnTogglePrompts = document.getElementById("btn-toggle-prompts");
+  const promptsEditorContainer = document.getElementById("prompts-editor-container");
+  const playSystemPrompt = document.getElementById("play-system-prompt");
   const playHybridCheck = document.getElementById("play-hybrid");
   const playRerankCheck = document.getElementById("play-rerank");
   const playQueryText = document.getElementById("play-query");
@@ -45,11 +50,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // Benchmark Evaluation Launcher Elements
   const evalDocSelect = document.getElementById("eval-doc");
   const evalDatasetSelect = document.getElementById("eval-dataset");
+  const evalLoaderSelect = document.getElementById("eval-loader");
+  const evalSplitterSelect = document.getElementById("eval-splitter");
   const evalStoreSelect = document.getElementById("eval-store");
   const evalCasesRange = document.getElementById("eval-cases");
   const evalCasesVal = document.getElementById("eval-cases-val");
   const evalHybridCheck = document.getElementById("eval-hybrid");
   const evalRerankCheck = document.getElementById("eval-rerank");
+  const evalProviderSelect = document.getElementById("eval-provider");
+  const evalModelInput = document.getElementById("eval-model");
+  const evalPromptSelect = document.getElementById("eval-prompt");
+  const btnToggleEvalPrompts = document.getElementById("btn-toggle-eval-prompts");
+  const evalPromptsEditorContainer = document.getElementById("eval-prompts-editor-container");
+  const evalSystemPrompt = document.getElementById("eval-system-prompt");
+  const evalGeneratorConfigRow = document.getElementById("eval-generator-config-row");
   const btnStartEval = document.getElementById("btn-start-eval");
   const btnEvalText = document.getElementById("btn-eval-text");
   const btnEvalSpinner = document.getElementById("btn-eval-spinner");
@@ -67,6 +81,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Golden Datasets Elements
   const genDocSelect = document.getElementById("gen-doc");
+  const genLoaderSelect = document.getElementById("gen-loader");
+  const genSplitterSelect = document.getElementById("gen-splitter");
+  const genSystemPrompt = document.getElementById("gen-system-prompt");
   const genInstructionText = document.getElementById("gen-instruction");
   const genCountRange = document.getElementById("gen-count");
   const genCountVal = document.getElementById("gen-count-val");
@@ -89,6 +106,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // In-memory cache
   let currentRunData = null;
+  let promptPresets = {
+    default: {
+      system: "You are a helpful assistant. Answer the question using ONLY the provided context. If the answer cannot be found in the context, say \"I don't have enough information to answer that.\"",
+      user: "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
+    },
+    concise: {
+      system: "You are a helpful assistant. Provide a concise, direct answer to the question using ONLY the provided context. Keep your response brief and to the point. If the answer cannot be found in the context, say \"I don't have enough information to answer that.\"",
+      user: "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
+    },
+    reasoning: {
+      system: "You are a helpful assistant. Answer the question using ONLY the provided context. First, break down your reasoning step-by-step based strictly on the facts in the context. Then provide your final answer. If the answer cannot be found in the context, say \"I don't have enough information to answer that.\"",
+      user: "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
+    }
+  };
+  let defaultSynthesisPrompt = "";
 
   // --- Tab Titles & Descriptions ---
   const tabInfo = {
@@ -129,13 +161,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Range sliders
-  playTopkRange.addEventListener("input", (e) => {
-    playTopkVal.textContent = e.target.value;
-  });
+  if (playTopkRange && playTopkVal) {
+    playTopkRange.addEventListener("input", (e) => {
+      playTopkVal.textContent = e.target.value;
+    });
+  }
 
-  genCountRange.addEventListener("input", (e) => {
-    genCountVal.textContent = e.target.value;
-  });
+  if (genCountRange && genCountVal) {
+    genCountRange.addEventListener("input", (e) => {
+      genCountVal.textContent = e.target.value;
+    });
+  }
 
   if (evalCasesRange && evalCasesVal) {
     evalCasesRange.addEventListener("input", (e) => {
@@ -167,16 +203,115 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Modal close
-  btnCloseModal.addEventListener("click", () => {
-    modal.classList.add("hidden");
-  });
-  window.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.add("hidden");
-  });
+  if (btnCloseModal && modal) {
+    btnCloseModal.addEventListener("click", () => {
+      modal.classList.add("hidden");
+    });
+  }
+  if (modal) {
+    window.addEventListener("click", (e) => {
+      if (e.target === modal) modal.classList.add("hidden");
+    });
+  }
+
+  // System Prompt Editor Toggle & Preset Sync
+  if (btnTogglePrompts && promptsEditorContainer) {
+    btnTogglePrompts.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isHidden = promptsEditorContainer.classList.toggle("hidden");
+      btnTogglePrompts.innerHTML = isHidden ? "👁️ View / Edit System Prompt" : "🔼 Collapse System Prompt";
+    });
+  }
+
+  if (playPromptSelect) {
+    playPromptSelect.addEventListener("change", (e) => {
+      const selected = e.target.value;
+      if (selected !== "custom" && promptPresets[selected]) {
+        if (playSystemPrompt) playSystemPrompt.value = promptPresets[selected].system || "";
+      }
+    });
+  }
+
+  const markPlayPromptCustom = () => {
+    if (playPromptSelect && playPromptSelect.value !== "custom") {
+      playPromptSelect.value = "custom";
+    }
+  };
+
+  if (playSystemPrompt) {
+    playSystemPrompt.addEventListener("input", markPlayPromptCustom);
+  }
+
+  // Benchmark System Prompt Editor Toggle & Preset Sync
+  if (btnToggleEvalPrompts && evalPromptsEditorContainer) {
+    btnToggleEvalPrompts.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isHidden = evalPromptsEditorContainer.classList.toggle("hidden");
+      btnToggleEvalPrompts.innerHTML = isHidden ? "👁️ View / Edit System Prompt" : "🔼 Collapse System Prompt";
+    });
+  }
+
+  if (evalPromptSelect) {
+    evalPromptSelect.addEventListener("change", (e) => {
+      const selected = e.target.value;
+      if (selected !== "custom" && promptPresets[selected]) {
+        if (evalSystemPrompt) evalSystemPrompt.value = promptPresets[selected].system || "";
+      }
+    });
+  }
+
+  const markEvalPromptCustom = () => {
+    if (evalPromptSelect && evalPromptSelect.value !== "custom") {
+      evalPromptSelect.value = "custom";
+    }
+  };
+
+  if (evalSystemPrompt) {
+    evalSystemPrompt.addEventListener("input", markEvalPromptCustom);
+  }
+
+  if (evalProviderSelect && evalModelInput) {
+    evalProviderSelect.addEventListener("change", (e) => {
+      const selectedProvider = e.target.value;
+      if (defaultProviderModels[selectedProvider]) {
+        evalModelInput.value = defaultProviderModels[selectedProvider];
+      }
+    });
+  }
 
   // =========================================================================
   // 1. Initial Data Fetching
   // =========================================================================
+  async function loadPromptTemplates() {
+    try {
+      const res = await fetch("/api/prompts/templates");
+      if (!res.ok) return;
+      const data = await res.json();
+      promptPresets = data.presets || {};
+      defaultSynthesisPrompt = data.synthesis_system_prompt || "";
+
+      // Prefill playground prompts if default preset exists
+      // Prefill playground and benchmark prompts if default preset exists
+      if (promptPresets["default"]) {
+        if (playSystemPrompt && !playSystemPrompt.value) {
+          playSystemPrompt.value = promptPresets["default"].system || "";
+        }
+        if (evalSystemPrompt && !evalSystemPrompt.value) {
+          evalSystemPrompt.value = promptPresets["default"].system || "";
+        }
+      }
+
+      // Prefill golden generator system prompt
+      if (genSystemPrompt && !genSystemPrompt.value) {
+        genSystemPrompt.value = defaultSynthesisPrompt;
+      }
+    } catch (err) {
+      console.error("Failed to load prompt templates:", err);
+    }
+  }
+
   async function loadDocuments() {
     try {
       const res = await fetch("/api/documents");
@@ -321,6 +456,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = {
       query: query,
       doc_path: playDocSelect.value,
+      loader_type: playLoaderSelect ? playLoaderSelect.value : "auto",
+      splitter_type: playSplitterSelect ? playSplitterSelect.value : "recursive",
       vector_store: playStoreSelect.value,
       embedding_provider: playEmbeddings ? playEmbeddings.value : "openai",
       chunk_size: playChunkSize ? (parseInt(playChunkSize.value, 10) || 500) : 500,
@@ -329,6 +466,7 @@ document.addEventListener("DOMContentLoaded", () => {
       provider: playProviderSelect.value,
       model_name: playModelInput.value.trim() || "gpt-4o-mini",
       prompt_template: playPromptSelect.value,
+      system_prompt: playSystemPrompt ? playSystemPrompt.value : undefined,
       use_reranker: playRerankCheck ? playRerankCheck.checked : false,
       use_hybrid: playHybridCheck ? playHybridCheck.checked : false
     };
@@ -537,6 +675,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     });
+
+    // Toggle benchmark generator & prompt config visibility based on scope
+    const isRetrieverOnly = (scope === "retriever_only");
+    if (evalGeneratorConfigRow) {
+      evalGeneratorConfigRow.style.display = isRetrieverOnly ? "none" : "";
+    }
+    if (evalPromptsEditorContainer) {
+      evalPromptsEditorContainer.style.display = isRetrieverOnly ? "none" : "";
+    }
+    if (evalProviderSelect && evalProviderSelect.parentElement) {
+      evalProviderSelect.parentElement.style.display = isRetrieverOnly ? "none" : "";
+    }
   }
 
   scopeRadios.forEach(radio => {
@@ -594,6 +744,8 @@ document.addEventListener("DOMContentLoaded", () => {
         doc_path: docPath,
         dataset_path: datasetPath,
         vector_store: vectorStore,
+        loader_type: evalLoaderSelect ? evalLoaderSelect.value : "auto",
+        splitter_type: evalSplitterSelect ? evalSplitterSelect.value : "recursive",
         embedding_provider: evalEmbeddings ? evalEmbeddings.value : "openai",
         chunk_size: evalChunkSize ? (parseInt(evalChunkSize.value, 10) || 500) : 500,
         chunk_overlap: evalChunkOverlap ? (parseInt(evalChunkOverlap.value, 10) || 100) : 100,
@@ -602,8 +754,12 @@ document.addEventListener("DOMContentLoaded", () => {
         use_hybrid: evalHybridCheck ? evalHybridCheck.checked : false,
         provider: "openai",
         model_name: "gpt-4o-mini",
+        provider: evalProviderSelect ? evalProviderSelect.value : "openai",
+        model_name: evalModelInput && evalModelInput.value.trim() ? evalModelInput.value.trim() : "gpt-4o-mini",
         temperature: 0.0,
         prompt_template: "default",
+        prompt_template: evalPromptSelect ? evalPromptSelect.value : "default",
+        system_prompt: evalSystemPrompt && evalSystemPrompt.value.trim() ? evalSystemPrompt.value.trim() : undefined,
         eval_model: "gpt-4o-mini",
         max_cases: maxCases,
         scope: scope,
@@ -682,6 +838,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const pills = [
       `Type: <strong>${hp.eval_type || (data.timestamp ? "ops_eval" : "N/A")}</strong>`,
       `Store: <strong>${hp.vector_store || hp.document || "N/A"}</strong>`,
+      `Loader: <strong>${hp.loader_type || "auto"}</strong>`,
+      `Splitter: <strong>${hp.splitter_type || "recursive"}</strong>`,
       `Hybrid: <strong>${hp.use_hybrid ? "Enabled (BM25+Dense)" : "Disabled"}</strong>`,
       `Model: <strong>${hp.model_name || "N/A"}</strong>`,
       `Reranker: <strong>${hp.use_reranker ? "Enabled" : "Disabled"}</strong>`,
@@ -944,7 +1102,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const hpB = runB.hyperparameters || {};
 
     // Hyperparameters rows
-    const hpKeys = ["eval_type", "vector_store", "use_hybrid", "model_name", "use_reranker", "top_k", "chunk_size", "prompt_template"];
+    const hpKeys = [
+      "eval_type",
+      "vector_store",
+      "loader_type",
+      "splitter_type",
+      "use_hybrid",
+      "model_name",
+      "use_reranker",
+      "top_k",
+      "chunk_size",
+      "chunk_overlap",
+      "prompt_template"
+    ];
     hpKeys.forEach(k => {
       const vA = hpA[k] !== undefined ? String(hpA[k]) : "N/A";
       const vB = hpB[k] !== undefined ? String(hpB[k]) : "N/A";
@@ -1090,7 +1260,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const payload = {
       doc_path: docPath,
+      system_prompt: genSystemPrompt ? genSystemPrompt.value : undefined,
       instruction: instruction || "Generate clear, representative questions and answers.",
+      loader_type: genLoaderSelect ? genLoaderSelect.value : "auto",
+      splitter_type: genSplitterSelect ? genSplitterSelect.value : "recursive",
       max_goldens: count,
       sample_strategy: strategy,
       output_file: outfile
@@ -1139,5 +1312,13 @@ document.addEventListener("DOMContentLoaded", () => {
   loadRuns();
   loadDatasets();
   loadMetricsCatalog();
-});
+  loadPromptTemplates();
+  console.log("RAG Eval Suite frontend initialized successfully.");
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
 
