@@ -3,11 +3,16 @@ from components.generator import generate_answer
 from components.retriever import build_retriever, retrieve_contexts
 
 
-def run_pipeline():
+def run_pipeline(
+    loader_type: int | str = "auto",
+    splitter_type: str = "recursive",
+):
     # 1. Build vector store and retriever with instant index caching
     print("Loading retriever (Chroma)...")
     retriever = build_retriever(
         doc_path="docs/Facebooks-Corporate-Human-Rights-Policy.pdf",
+        loader_type=loader_type,
+        splitter_type=splitter_type,
         k=2,
     )
 

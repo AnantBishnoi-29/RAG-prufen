@@ -17,3 +17,4 @@ databases/
 .deepeval/
 evals/results/
 evals/datasets
+visualizations
