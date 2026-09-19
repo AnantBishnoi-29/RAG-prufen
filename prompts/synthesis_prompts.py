@@ -18,12 +18,7 @@ Context Excerpt:
 
 Task:
 Based SOLELY on the context excerpt above, generate a realistic question and a comprehensive, accurate expected answer according to the user instruction.
-
-Respond ONLY with a valid JSON object in the following format, with no surrounding commentary or explanation:
-{{
-  "question": "The generated question",
-  "expected_answer": "The accurate, grounded answer"
-}}"""
+"""
 
 
 def format_synthesis_prompt(user_instruction: str, context: str) -> str:
