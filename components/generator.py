@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from prompts import get_prompt_template
+from prompts import DEFAULT_USER_TEMPLATE, QA_PRESETS, get_qa_preset
 
 load_dotenv()
 
@@ -57,11 +57,13 @@ def generate_answer(
     model_name: str | None = None,
     temperature: float = 0.0,
     prompt_template: str = "default",
+    system_prompt: str | None = None,
     **kwargs,
 ) -> str:
     """
     Generates an answer using the provided query and retrieved contexts.
     Can accept a pre-built LLM instance or build one using provider, model_name, and temperature.
+    Supports decoupled system_prompt and user_prompt, named presets, or raw monolithic templates.
     """
     if llm is None:
         llm = get_llm(
@@ -71,10 +73,18 @@ def generate_answer(
             **kwargs,
         )
 
-    raw_template = get_prompt_template(prompt_template)
     combined_context = "\n\n".join(contexts)
 
-    prompt = ChatPromptTemplate.from_template(raw_template)
+    # Decoupled Chat Prompt Construction
+    preset = get_qa_preset(prompt_template)
+    final_sys = system_prompt.strip() if system_prompt and system_prompt.strip() else preset["system"]
+
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", final_sys),
+        ("human", DEFAULT_USER_TEMPLATE),
+    ])
+
     chain = prompt | llm | StrOutputParser()
 
     return chain.invoke({
