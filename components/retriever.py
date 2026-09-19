@@ -22,12 +22,15 @@ from components.vector_stores import (
 
 def get_collection_name(
     doc_path: str,
+    loader_type: int | str = "auto",
+    splitter_type: str = "recursive",
     chunk_size: int = 500,
     chunk_overlap: int = 100,
     embedding_provider: str = "openai",
 ) -> str:
     """
     Computes a deterministic, valid collection slug based on document and chunking settings.
+    Computes a deterministic, valid collection slug based on document, loader, and chunking settings.
     Ensures safe characters (alphanumeric and underscore) conforming to Chroma/Qdrant standards.
     """
     doc_stem = Path(doc_path).stem
@@ -35,6 +38,10 @@ def get_collection_name(
     clean_slug = cleaned_stem.strip("_")[:24].rstrip("_") or "doc"
 
     param_str = f"{Path(doc_path).name}_{chunk_size}_{chunk_overlap}_{embedding_provider}"
+    param_str = (
+        f"{Path(doc_path).name}_{loader_type}_{splitter_type}_"
+        f"{chunk_size}_{chunk_overlap}_{embedding_provider}"
+    )
     param_hash = hashlib.md5(param_str.encode("utf-8")).hexdigest()[:8]
 
     return f"c_{clean_slug}_{chunk_size}_{param_hash}"
@@ -155,6 +162,8 @@ def build_retriever(
     if collection_name is None or collection_name == "rag_collection":
         target_collection = get_collection_name(
             doc_path=doc_path,
+            loader_type=loader_type,
+            splitter_type=splitter_type,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             embedding_provider="bm25" if is_bm25 else embedding_provider,

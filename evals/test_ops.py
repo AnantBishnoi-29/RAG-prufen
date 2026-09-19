@@ -39,6 +39,7 @@ def run_ops_eval(
     chunk_size: int = 500,
     chunk_overlap: int = 100,
     embedding_provider: str = "openai",
+    loader_type: str = "auto",
     splitter_type: str = "recursive",
     use_reranker: bool = False,
     use_hybrid: bool = False,
@@ -76,6 +77,7 @@ def run_ops_eval(
     t_retriever_init = time.perf_counter()
     retriever = build_retriever(
         doc_path=str(full_doc_path),
+        loader_type=loader_type,
         splitter_type=splitter_type,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -184,6 +186,7 @@ def run_ops_eval(
             "document": full_doc_path.name,
             "vector_store": vector_store_type,
             "embedding_provider": embedding_provider,
+            "loader_type": loader_type,
             "splitter_type": splitter_type,
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,

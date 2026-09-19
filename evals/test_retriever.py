@@ -24,6 +24,8 @@ def run_retriever_eval(
     doc_path: str = "docs/Facebooks-Corporate-Human-Rights-Policy.pdf",
     dataset_path: str = "evals/datasets/golden_dataset.json",
     vector_store_type: str = "chroma",
+    loader_type: int | str = "auto",
+    splitter_type: str = "recursive",
     chunk_size: int = 500,
     chunk_overlap: int = 100,
     use_reranker: bool = False,
@@ -39,6 +41,7 @@ def run_retriever_eval(
 
     print(f"\n--- Running Retriever Evaluation ---")
     print(f"Document: {full_doc_path.name}")
+    print(f"Loader: {loader_type} | Splitter: {splitter_type}")
     print(f"Vector Store: {vector_store_type}")
     print(f"Chunk Size: {chunk_size} (overlap: {chunk_overlap})")
     print(f"Reranker: {'Enabled (cross-encoder)' if use_reranker else 'Disabled'}")
@@ -50,6 +53,8 @@ def run_retriever_eval(
     retriever = build_retriever(
         doc_path=str(full_doc_path),
         vector_store_type=vector_store_type,
+        loader_type=loader_type,
+        splitter_type=splitter_type,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         k=top_k,
@@ -91,6 +96,8 @@ def run_retriever_eval(
 
     hyperparams = {
         "vector_store": vector_store_type,
+        "loader_type": str(loader_type),
+        "splitter_type": splitter_type,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "use_reranker": use_reranker,
