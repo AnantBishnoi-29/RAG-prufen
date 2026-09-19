@@ -703,8 +703,11 @@ function initApp() {
     });
   });
 
+  let isBenchmarkRunning = false;
   if (btnStartEval) {
     btnStartEval.addEventListener("click", async () => {
+      if (isBenchmarkRunning) return;
+
       const docPath = evalDocSelect.value;
       const datasetPath = evalDatasetSelect.value;
       const vectorStore = evalStoreSelect.value;
@@ -731,6 +734,7 @@ function initApp() {
         return;
       }
 
+      isBenchmarkRunning = true;
       btnStartEval.disabled = true;
       btnEvalText.textContent = "Running Benchmark (this may take 20-60s)...";
       btnEvalSpinner.classList.remove("hidden");
@@ -787,6 +791,7 @@ function initApp() {
         evalStatusMsg.textContent = `❌ ${err.message}`;
         evalStatusMsg.classList.remove("hidden");
       } finally {
+        isBenchmarkRunning = false;
         btnStartEval.disabled = false;
         btnEvalText.textContent = "▶️ Run Selected Benchmark";
         btnEvalSpinner.classList.add("hidden");
@@ -835,14 +840,19 @@ function initApp() {
           ? ((data.latency_metrics.total_latency_ms.mean * (data.testCases?.length || data.per_query_results?.length || 1)) / 1000).toFixed(2) + "s"
           : "N/A");
 
+    const isHybrid = hp.use_hybrid === true || hp.use_hybrid === "true" || hp.use_hybrid === "True";
+    const isRerank = hp.use_reranker === true || hp.use_reranker === "true" || hp.use_reranker === "True";
+
     const pills = [
       `Type: <strong>${hp.eval_type || (data.timestamp ? "ops_eval" : "N/A")}</strong>`,
-      `Store: <strong>${hp.vector_store || hp.document || "N/A"}</strong>`,
+      `Doc: <strong>${hp.document || "N/A"}</strong>`,
+      `Dataset: <strong>${hp.dataset || "N/A"}</strong>`,
+      `Store: <strong>${hp.vector_store || hp.vector_store_type || "N/A"}</strong>`,
       `Loader: <strong>${hp.loader_type || "auto"}</strong>`,
       `Splitter: <strong>${hp.splitter_type || "recursive"}</strong>`,
-      `Hybrid: <strong>${hp.use_hybrid ? "Enabled (BM25+Dense)" : "Disabled"}</strong>`,
+      `Hybrid: <strong>${isHybrid ? "Enabled (BM25+Dense)" : "Disabled"}</strong>`,
       `Model: <strong>${hp.model_name || "N/A"}</strong>`,
-      `Reranker: <strong>${hp.use_reranker ? "Enabled" : "Disabled"}</strong>`,
+      `Reranker: <strong>${isRerank ? "Enabled" : "Disabled"}</strong>`,
       `Top-K: <strong>${hp.top_k || "N/A"}</strong>`,
       `Duration: <strong>${durVal}</strong>`,
       `Cost: <strong>$${typeof costVal === "number" ? costVal.toFixed(5) : "0.00"}</strong>`
