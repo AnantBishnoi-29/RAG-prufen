@@ -63,7 +63,7 @@ def generate_answer(
     """
     Generates an answer using the provided query and retrieved contexts.
     Can accept a pre-built LLM instance or build one using provider, model_name, and temperature.
-    Supports decoupled system_prompt and user_prompt, named presets, or raw monolithic templates.
+    Supports customizable system_prompt and named presets.
     """
     if llm is None:
         llm = get_llm(
@@ -78,7 +78,6 @@ def generate_answer(
     # Decoupled Chat Prompt Construction
     preset = get_qa_preset(prompt_template)
     final_sys = system_prompt.strip() if system_prompt and system_prompt.strip() else preset["system"]
-
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", final_sys),

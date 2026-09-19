@@ -141,8 +141,8 @@ Following the principle: **First make it work, then make it work better.**
   - **Integrated Safety Metrics**: Added `toxicity` and `bias` to `evals/registry.py` (opt-in by default) with generator requirement integration in `evals/test_rag.py` and UI scope disabling in `web/static/app.js`.
 - [x] **Phase 7: Developer Prompt Visibility, Editable Templates & Chat Decoupling**
   - **Decoupled System & User Templates**: Separated system prompts and user templates into structured presets in `prompts/qa_templates.py` (`QA_PRESETS`: `Default Grounded`, `Concise & Direct`, `Step-by-Step Reasoning`, `Custom`).
-  - **Chat-Native Prompt Pipeline**: Updated `components/generator.py` to accept explicit `system_prompt` and `user_prompt` constructing structured `ChatPromptTemplate.from_messages([("system", ...), ("human", ...)])` while preserving monolithic backwards compatibility.
-  - **Interactive UI Prompt Editor**: Expandable prompt editor in the Live Playground with bidirectional synchronization: selecting presets auto-populates textareas, and manual edits reactively switch the selector to `Custom (User Defined)`.
+  - **Chat-Native Prompt Pipeline**: Structured `components/generator.py` using `ChatPromptTemplate.from_messages([("system", ...), ("human", DEFAULT_USER_TEMPLATE)])` with customizable `system_prompt` and locked context/question data plumbing.
+  - **Interactive UI Prompt Editor**: Expandable prompt editor in the Live Playground with bidirectional synchronization: selecting presets auto-populates the System Prompt textarea, and manual edits reactively switch the selector to `Custom (User Defined)`.
   - **Editable Golden Synthesizer Directive**: Exposed editable System Prompt in the Golden Dataset Generator prefilled with `SYNTHESIS_SYSTEM_PROMPT`.
   - **Full API & Eval Suite Forwarding**: Added `GET /api/prompts/templates`, updated `QueryRequest`, `GoldenGenRequest`, `EvalRunRequest`, and forwarded custom prompts into `run_rag_eval()` and run hyperparameters.
 

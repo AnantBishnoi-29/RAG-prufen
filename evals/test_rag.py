@@ -66,7 +66,6 @@ def run_rag_eval(
     temperature: float = 0.0,
     prompt_template: str = "default",
     system_prompt: str | None = None,
-    user_prompt: str | None = None,
     max_cases: int | None = None,
     eval_model: str = "gpt-4o-mini",
     scope: str = "all",  # "all", "retriever_only", "generator_only"
@@ -176,7 +175,6 @@ def run_rag_eval(
                     temperature=temperature,
                     prompt_template=prompt_template,
                     system_prompt=system_prompt,
-                    user_prompt=user_prompt,
                 )
                 gen_sec = time.perf_counter() - t_gen_start
             gen_ms = round(gen_sec * 1000, 2)
@@ -296,7 +294,6 @@ def run_rag_eval(
         "temperature": temperature,
         "prompt_template": prompt_template,
         "system_prompt": system_prompt if system_prompt else "preset",
-        "user_prompt": user_prompt if user_prompt else "preset",
         "eval_model": eval_model,
         "metrics_count": len(deepeval_metrics),
     }
