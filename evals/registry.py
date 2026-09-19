@@ -5,15 +5,10 @@ Allows dynamic discovery by the API and Web UI.
 """
 
 from typing import Any, Callable
-from deepeval.metrics import (
-    AnswerRelevancyMetric,
-    BiasMetric,
-    ContextualPrecisionMetric,
-    ContextualRecallMetric,
-    FaithfulnessMetric,
-    HallucinationMetric,
-    ToxicityMetric,
-)
+def _make_deepeval_metric(cls_name: str, **kwargs):
+    import deepeval.metrics as dm
+    cls = getattr(dm, cls_name)
+    return cls(**kwargs)
 
 
 # Metric Definitions with metadata and lazy factory instantiation
@@ -26,7 +21,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Retriever Metrics",
         "description": "Measures whether retrieved context contains all facts needed to answer the query compared to ground truth.",
         "default_checked": True,
-        "factory": lambda model: ContextualRecallMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("ContextualRecallMetric", threshold=0.7, model=model, include_reason=False),
     },
     "contextual_precision": {
         "id": "contextual_precision",
@@ -35,7 +30,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Retriever Metrics",
         "description": "Measures whether the most relevant chunks are ranked at the top of the context window.",
         "default_checked": True,
-        "factory": lambda model: ContextualPrecisionMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("ContextualPrecisionMetric", threshold=0.7, model=model, include_reason=False),
     },
 
     # --- Generator Metrics ---
@@ -46,7 +41,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Generator Metrics",
         "description": "Verifies that the generated answer is strictly grounded in the retrieved chunks without unsupported claims.",
         "default_checked": True,
-        "factory": lambda model: FaithfulnessMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("FaithfulnessMetric", threshold=0.7, model=model, include_reason=False),
     },
     "answer_relevancy": {
         "id": "answer_relevancy",
@@ -55,7 +50,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Generator Metrics",
         "description": "Evaluates how directly and concisely the answer addresses the user's query.",
         "default_checked": True,
-        "factory": lambda model: AnswerRelevancyMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("AnswerRelevancyMetric", threshold=0.7, model=model, include_reason=False),
     },
     "hallucination": {
         "id": "hallucination",
@@ -64,7 +59,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Generator Metrics",
         "description": "Detects if the generator introduces external or contradictory facts beyond the ground truth context.",
         "default_checked": True,
-        "factory": lambda model: HallucinationMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("HallucinationMetric", threshold=0.7, model=model, include_reason=False),
     },
 
     # --- Safety & Robustness Metrics (Opt-in) ---
@@ -75,7 +70,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Safety & Robustness",
         "description": "Measures whether the generated output contains toxic, hateful, or harmful statements.",
         "default_checked": False,
-        "factory": lambda model: ToxicityMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("ToxicityMetric", threshold=0.7, model=model, include_reason=False),
     },
     "bias": {
         "id": "bias",
@@ -84,7 +79,7 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
         "category_label": "Safety & Robustness",
         "description": "Measures whether the generated output contains unfair stereotyping, bias, or prejudice.",
         "default_checked": False,
-        "factory": lambda model: BiasMetric(threshold=0.7, model=model, include_reason=False),
+        "factory": lambda model: _make_deepeval_metric("BiasMetric", threshold=0.7, model=model, include_reason=False),
     },
 
     # --- Operational & Cost Metrics (Always available across all scopes) ---
