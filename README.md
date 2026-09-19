@@ -145,5 +145,6 @@ Following the principle: **First make it work, then make it work better.**
   - **Interactive UI Prompt Editor**: Expandable prompt editor in the Live Playground with bidirectional synchronization: selecting presets auto-populates the System Prompt textarea, and manual edits reactively switch the selector to `Custom (User Defined)`.
   - **Editable Golden Synthesizer Directive**: Exposed editable System Prompt in the Golden Dataset Generator prefilled with `SYNTHESIS_SYSTEM_PROMPT`.
   - **Full API & Eval Suite Forwarding**: Added `GET /api/prompts/templates`, updated `QueryRequest`, `GoldenGenRequest`, `EvalRunRequest`, and forwarded custom prompts into `run_rag_eval()` and run hyperparameters.
+  - **Embedded Qdrant Singleton Client Management**: Process-wide cached `QdrantClient` in `components/vector_stores.py` resolving `portalocker` file lock conflicts (`databases/qdrant is already accessed by another instance`) during concurrent queries and benchmark runs.
 
 

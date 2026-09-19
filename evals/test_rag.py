@@ -279,6 +279,8 @@ def run_rag_eval(
     hyperparams = {
         "eval_type": f"rag_eval_{scope}",
         "scope": scope,
+        "document": Path(doc_path).name,
+        "dataset": Path(dataset_path).name,
         "vector_store": vector_store_type if scope != "generator_only" else "none",
         "vector_store_type": vector_store_type,
         "embedding_provider": embedding_provider,
@@ -323,6 +325,7 @@ def run_rag_eval(
             try:
                 with open(target_file, "r", encoding="utf-8") as rf:
                     run_data = json.load(rf)
+                run_data["hyperparameters"] = hyperparams
                 run_data["latency_metrics"] = latency_metrics
                 run_data["token_metrics"] = token_metrics
                 run_data["cost_metrics"] = cost_metrics
