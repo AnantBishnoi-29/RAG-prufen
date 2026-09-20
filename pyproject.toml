@@ -20,7 +20,6 @@ dependencies = [
     "torchvision",
     "torchaudio",
     "langchain-deepseek>=1.1.0",
-    "streamlit>=1.62.0",
     "langchain-community>=0.4.2",
     "pypdf>=6.16.2",
     "faiss-cpu>=1.15.0",

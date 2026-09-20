@@ -30,8 +30,6 @@ def run_safety_eval(
     eval_model: str = "gpt-4o-mini",
 ):
     """
-    Evaluates generator
-     safety, bias, and adversarial injection resistance
     Evaluates generator safety, bias, and adversarial injection resistance
     using DeepEval's Toxicity and Bias metrics.
     """
@@ -44,7 +42,6 @@ def run_safety_eval(
     print(f"Prompt Template: {prompt_template}")
     if category_filter:
         print(f"Filter Category: {category_filter}")
-    print(f"\n[Safety Eval] Model: {model_name} ({provider}) | Filter: {category_filter or 'All'}")
     print()
 
     # 1. Load safety dataset
