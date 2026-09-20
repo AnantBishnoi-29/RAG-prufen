@@ -66,9 +66,6 @@ class NullCostTracker:
     enabled: bool = False
     usage_metadata: dict[str, dict[str, Any]] = {}
 
-    def summary(self) -> str:
-        return "Cost tracking is disabled."
-
 
 class UniversalCostTracker:
     """Tracks token usage and calculates USD costs across any LLM provider."""

@@ -3,7 +3,6 @@ from pathlib import Path
 import re
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from langchain_core.vectorstores import VectorStoreRetriever
 
 from components.embeddings import get_embeddings
 from components.loaders import load_documents
@@ -29,7 +28,6 @@ def get_collection_name(
     embedding_provider: str = "openai",
 ) -> str:
     """
-    Computes a deterministic, valid collection slug based on document and chunking settings.
     Computes a deterministic, valid collection slug based on document, loader, and chunking settings.
     Ensures safe characters (alphanumeric and underscore) conforming to Chroma/Qdrant standards.
     """
@@ -37,7 +35,6 @@ def get_collection_name(
     cleaned_stem = re.sub(r"[^a-zA-Z0-9_]", "_", doc_stem)
     clean_slug = cleaned_stem.strip("_")[:24].rstrip("_") or "doc"
 
-    param_str = f"{Path(doc_path).name}_{chunk_size}_{chunk_overlap}_{embedding_provider}"
     param_str = (
         f"{Path(doc_path).name}_{loader_type}_{splitter_type}_"
         f"{chunk_size}_{chunk_overlap}_{embedding_provider}"
@@ -111,14 +108,17 @@ def build_retriever(
     k: int = 3,
     force_rebuild: bool = False,
     use_hybrid: bool = False,
+    search_type: str = "similarity",
+    score_threshold: float | None = None,
 ) -> BaseRetriever:
     """
     End-to-end retriever orchestrator with intelligent index caching:
     - If an index already exists for the given document + chunk parameters, mounts from disk in <30ms.
     - Otherwise (or if force_rebuild=True), loads, chunks, embeds (or indexes), and saves the new index to disk.
-    - Supports dense vector stores ('chroma', 'faiss', 'qdrant') and sparse keyword retrieval ('bm25').
     - Supports dense vector stores ('chroma', 'faiss', 'qdrant'), sparse keyword retrieval ('bm25'),
       and hybrid retrieval (dense + BM25 via Reciprocal Rank Fusion).
+    - Supports configurable search_type ('similarity', 'similarity_score_threshold', 'mmr')
+      and score_threshold.
     """
     engine = vector_store_type.lower().strip()
     is_bm25 = engine in ("bm25", "4")
@@ -137,6 +137,8 @@ def build_retriever(
             k=k,
             force_rebuild=force_rebuild,
             use_hybrid=False,
+            search_type=search_type,
+            score_threshold=score_threshold,
         )
         bm25_retriever = build_retriever(
             doc_path=doc_path,
@@ -150,6 +152,7 @@ def build_retriever(
             k=k,
             force_rebuild=force_rebuild,
             use_hybrid=False,
+            score_threshold=score_threshold,
         )
         print(f"[Hybrid Retriever Ready] Combining '{vector_store_type}' (Dense) + BM25 (Sparse) via RRF (k={k})")
         return HybridRetriever(
@@ -173,9 +176,10 @@ def build_retriever(
 
     # Handle BM25 (Sparse Keyword Search)
     if is_bm25:
+        effective_bm25_threshold = score_threshold if (score_threshold is not None and score_threshold > 0.0) else 0.0
         if not force_rebuild and bm25_store_exists(collection_name=target_collection):
             print(f"[Retriever Cache HIT] Loading existing BM25 index for '{Path(doc_path).name}' ({target_collection})")
-            return load_bm25_retriever(collection_name=target_collection, k=k)
+            return load_bm25_retriever(collection_name=target_collection, k=k, score_threshold=effective_bm25_threshold)
 
         print(f"[Retriever Cache MISS] Building new BM25 index for '{Path(doc_path).name}' ({target_collection})...")
         docs = load_documents(path=doc_path, choice=loader_type)
@@ -189,6 +193,7 @@ def build_retriever(
             documents=chunks,
             collection_name=target_collection,
             k=k,
+            score_threshold=effective_bm25_threshold,
         )
 
     # Handle Dense Vector Stores (Chroma, FAISS, Qdrant)
@@ -202,7 +207,12 @@ def build_retriever(
             store_type=vector_store_type,
             collection_name=target_collection,
         )
-        return _get_retriever(vector_store, k=k)
+        return _get_retriever(
+            vector_store,
+            k=k,
+            search_type=search_type,
+            score_threshold=score_threshold,
+        )
 
     # 3. Cache miss: Load, chunk, embed, and persist
     print(f"[Retriever Cache MISS] Building new '{vector_store_type}' index for '{Path(doc_path).name}' ({target_collection})...")
@@ -222,8 +232,12 @@ def build_retriever(
         collection_name=target_collection,
     )
 
-
-    return _get_retriever(vector_store, k=k)
+    return _get_retriever(
+        vector_store,
+        k=k,
+        search_type=search_type,
+        score_threshold=score_threshold,
+    )
 
 
 def retrieve(
@@ -232,22 +246,35 @@ def retrieve(
     use_reranker: bool = False,
     top_k: int = 3,
     rerank_top_n: int | None = None,
+    score_threshold: float | None = None,
 ) -> list[Document]:
     """
-    Retrieves matching documents for a query, with optional cross-encoder reranking.
+    Retrieves matching documents for a query, with optional cross-encoder reranking
+    and relevance threshold filtering.
     """
     effective_top_n = rerank_top_n if rerank_top_n is not None else top_k
     # If using reranker, fetch 3x candidates first to let reranker filter the best
     fetch_k = effective_top_n * 3 if use_reranker else effective_top_n
     if hasattr(retriever, "search_kwargs"):
         retriever.search_kwargs["k"] = fetch_k
+        if score_threshold is not None and score_threshold > 0.0:
+            if getattr(retriever, "search_type", None) == "similarity_score_threshold":
+                retriever.search_kwargs["score_threshold"] = score_threshold
     elif hasattr(retriever, "k"):
         retriever.k = fetch_k
+
+    if hasattr(retriever, "score_threshold") and score_threshold is not None:
+        retriever.score_threshold = score_threshold
 
     docs = retriever.invoke(query)
 
     if use_reranker and docs:
-        return rerank(query=query, documents=docs, top_n=effective_top_n)
+        return rerank(
+            query=query,
+            documents=docs,
+            top_n=effective_top_n,
+            score_threshold=score_threshold,
+        )
 
     return docs[:effective_top_n]
 
@@ -258,6 +285,7 @@ def retrieve_contexts(
     use_reranker: bool = False,
     top_k: int = 3,
     rerank_top_n: int | None = None,
+    score_threshold: float | None = None,
     return_documents: bool = False,
 ) -> list[str] | list[Document]:
     """
@@ -270,18 +298,9 @@ def retrieve_contexts(
         use_reranker=use_reranker,
         top_k=top_k,
         rerank_top_n=rerank_top_n,
+        score_threshold=score_threshold,
     )
     if return_documents:
         return docs
     return [doc.page_content for doc in docs]
 
-
-# Backwards-compatibility helpers for main.py and test_rag.py
-def create_vector_store(path: str, **kwargs):
-    return build_retriever(doc_path=path, **kwargs)
-
-
-def get_retriever(vector_store_or_retriever, k: int = 3) -> BaseRetriever:
-    if hasattr(vector_store_or_retriever, "as_retriever"):
-        return _get_retriever(vector_store_or_retriever, k=k)
-    return vector_store_or_retriever

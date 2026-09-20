@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from prompts import DEFAULT_USER_TEMPLATE, QA_PRESETS, get_qa_preset
+from prompts import DEFAULT_USER_TEMPLATE, get_qa_preset
 
 load_dotenv()
 
@@ -65,6 +65,9 @@ def generate_answer(
     Can accept a pre-built LLM instance or build one using provider, model_name, and temperature.
     Supports customizable system_prompt and named presets.
     """
+    if not contexts:
+        return "No relevant information found in the document matching the specified criteria."
+
     if llm is None:
         llm = get_llm(
             provider=provider,
