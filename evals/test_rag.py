@@ -30,9 +30,9 @@ if str(ROOT) not in sys.path:
 
 from components.cost_tracker import track_cost
 from components.generator import generate_answer
-from components.retriever import build_retriever, retrieve_contexts
+from components.retriever import build_retriever, retrieve
 from deepeval.evaluate import evaluate
-from deepeval.evaluate.configs import DisplayConfig
+from deepeval.evaluate.configs import AsyncConfig, DisplayConfig, ErrorConfig
 from deepeval.test_case import LLMTestCase
 from evals.registry import build_selected_metrics
 
@@ -61,6 +61,8 @@ def run_rag_eval(
     use_reranker: bool = False,
     use_hybrid: bool = False,
     top_k: int = 3,
+    search_type: str = "similarity",
+    score_threshold: float = 0.0,
     provider: str = "openai",
     model_name: str = "gpt-4o-mini",
     temperature: float = 0.0,
@@ -75,9 +77,10 @@ def run_rag_eval(
     Executes selective RAG evaluation:
     - scope="all": Full end-to-end evaluation (both retrieval and answer generation).
     - scope="retriever_only": Evaluates retriever metrics (Contextual Recall/Precision) and skips generation.
-    - scope="generator_only": Evaluates generator metrics (Faithfulness, Relevancy, Hallucination).
     - scope="generator_only": Evaluates generator metrics (Faithfulness, Relevancy, Hallucination, Safety).
     - selected_metrics: List of metric IDs to execute from evals.registry.
+    - search_type: 'similarity', 'similarity_score_threshold', or 'mmr'.
+    - score_threshold: minimum relevance cutoff (0.0 = disabled).
     """
     full_doc_path = ROOT / doc_path if not Path(doc_path).is_absolute() else Path(doc_path)
     full_dataset_path = ROOT / dataset_path if not Path(dataset_path).is_absolute() else Path(dataset_path)
@@ -113,6 +116,8 @@ def run_rag_eval(
             vector_store_type=vector_store_type,
             k=top_k,
             use_hybrid=use_hybrid,
+            search_type=search_type,
+            score_threshold=score_threshold,
         )
 
     # 3. Load golden dataset
@@ -149,13 +154,16 @@ def run_rag_eval(
 
         # Step A: Retrieval
         t_ret_start = time.perf_counter()
+        retrieved_docs = []
         if retriever is not None:
-            retrieved_chunks = retrieve_contexts(
+            retrieved_docs = retrieve(
                 retriever=retriever,
                 query=query,
                 use_reranker=use_reranker,
                 top_k=top_k,
+                score_threshold=score_threshold,
             )
+            retrieved_chunks = [d.page_content for d in retrieved_docs]
         else:
             # In generator isolation, test against golden context directly
             retrieved_chunks = golden_context
@@ -164,32 +172,57 @@ def run_rag_eval(
         retrieval_latencies.append(retrieval_ms)
 
         # Step B: Generation (conditionally skipped if retriever_only)
+        # Structure chunk info for proof tracing & source/page verification
+        chunks_info = []
+        for idx_c, d in enumerate(retrieved_docs):
+            meta = getattr(d, "metadata", {}) or {}
+            val = meta.get("page") if "page" in meta else meta.get("page_number")
+            page_num = None
+            if val is not None:
+                try:
+                    page_num = int(val) + 1
+                except (ValueError, TypeError):
+                    pass
+            source_file = Path(meta.get("source", "")).name if meta.get("source") else ""
+            chunks_info.append({
+                "index": idx_c + 1,
+                "content": d.page_content,
+                "chars": len(d.page_content),
+                "page": page_num,
+                "source": source_file,
+                "score": meta.get("relevance_score") or meta.get("rerank_prob") or meta.get("bm25_score"),
+            })
+
+        # Step B: Generation (conditionally skipped if retriever_only or if no chunks pass threshold)
+        answer = "N/A"
+        gen_sec = 0.0
+        gen_ms = 0.0
+        p_tok = 0
+        c_tok = 0
+        tot_tok = 0
+        c_usd = 0.0
+
         if needs_generation:
-            with track_cost() as cost_tracker:
-                t_gen_start = time.perf_counter()
-                answer = generate_answer(
-                    query=query,
-                    contexts=retrieved_chunks,
-                    provider=provider,
-                    model_name=model_name,
-                    temperature=temperature,
-                    prompt_template=prompt_template,
-                    system_prompt=system_prompt,
-                )
-                gen_sec = time.perf_counter() - t_gen_start
-            gen_ms = round(gen_sec * 1000, 2)
-            p_tok = getattr(cost_tracker, "prompt_tokens", 0)
-            c_tok = getattr(cost_tracker, "completion_tokens", 0)
-            tot_tok = getattr(cost_tracker, "total_tokens", 0)
-            c_usd = getattr(cost_tracker, "total_cost", 0.0)
-        else:
-            answer = "N/A"
-            gen_sec = 0.0
-            gen_ms = 0.0
-            p_tok = 0
-            c_tok = 0
-            tot_tok = 0
-            c_usd = 0.0
+            if not retrieved_chunks:
+                answer = "No relevant information found in the document matching the specified criteria."
+            else:
+                with track_cost() as cost_tracker:
+                    t_gen_start = time.perf_counter()
+                    answer = generate_answer(
+                        query=query,
+                        contexts=retrieved_chunks,
+                        provider=provider,
+                        model_name=model_name,
+                        temperature=temperature,
+                        prompt_template=prompt_template,
+                        system_prompt=system_prompt,
+                    )
+                    gen_sec = time.perf_counter() - t_gen_start
+                gen_ms = round(gen_sec * 1000, 2)
+                p_tok = getattr(cost_tracker, "prompt_tokens", 0)
+                c_tok = getattr(cost_tracker, "completion_tokens", 0)
+                tot_tok = getattr(cost_tracker, "total_tokens", 0)
+                c_usd = getattr(cost_tracker, "total_cost", 0.0)
 
         generation_latencies.append(gen_ms)
         tot_ms = round((retrieval_sec + gen_sec) * 1000, 2)
@@ -215,6 +248,7 @@ def run_rag_eval(
             "total_tokens": tot_tok,
             "throughput_tokens_per_sec": throughput,
             "cost_usd": round(c_usd, 6),
+            "retrieval_chunks_info": chunks_info,
         })
 
         test_cases.append(
@@ -227,7 +261,6 @@ def run_rag_eval(
             )
         )
       
-    # 5. Execute Evaluation with DeepEval
     # 5. Compute Aggregated Ops & Latency Metrics
     n_queries = len(goldens)
     avg_cost_per_query = grand_total_cost / n_queries if n_queries else 0.0
@@ -263,6 +296,23 @@ def run_rag_eval(
         "grand_total_tokens": grand_total_tokens,
         "avg_tokens_per_query": round(grand_total_tokens / n_queries, 1) if n_queries else 0.0,
         "avg_throughput_tokens_per_sec": round(statistics.mean(all_throughputs), 2) if all_throughputs else 0.0,
+        "prompt_tokens": {
+            "total": total_prompt_tokens,
+            "mean_per_query": round(total_prompt_tokens / n_queries, 1) if n_queries else 0,
+        },
+        "completion_tokens": {
+            "total": total_completion_tokens,
+            "mean_per_query": round(total_completion_tokens / n_queries, 1) if n_queries else 0,
+        },
+        "total_tokens": {
+            "total": grand_total_tokens,
+            "mean_per_query": round(grand_total_tokens / n_queries, 1) if n_queries else 0,
+        },
+        "throughput_tokens_per_sec": {
+            "mean": round(statistics.mean(all_throughputs), 2) if all_throughputs else 0.0,
+            "p50": calculate_percentile(all_throughputs, 50),
+            "p95": calculate_percentile(all_throughputs, 95),
+        },
     }
 
     cost_metrics = {
@@ -291,6 +341,8 @@ def run_rag_eval(
         "use_reranker": use_reranker,
         "use_hybrid": use_hybrid,
         "top_k": top_k,
+        "search_type": search_type,
+        "score_threshold": score_threshold,
         "provider": provider if needs_generation else "none",
         "model_name": model_name if needs_generation else "none",
         "temperature": temperature,
@@ -304,17 +356,32 @@ def run_rag_eval(
         results_folder=str(results_dir),
         print_results=True,
     )
+    error_cfg = ErrorConfig(
+        ignore_errors=True,
+        skip_on_missing_params=True,
+    )
+    async_cfg = AsyncConfig(
+        run_async=True,
+        throttle_value=1,
+        max_concurrent=5,
+    )
 
     if deepeval_metrics:
         print("\nEvaluating with DeepEval...")
-        eval_result = evaluate(
-            test_cases=test_cases,
-            metrics=deepeval_metrics,
-            hyperparameters=hyperparams,
-            display_config=display_cfg,
-        )
+        eval_result = None
+        try:
+            eval_result = evaluate(
+                test_cases=test_cases,
+                metrics=deepeval_metrics,
+                hyperparameters=hyperparams,
+                display_config=display_cfg,
+                error_config=error_cfg,
+                async_config=async_cfg,
+            )
+        except Exception as eval_err:
+            print(f"[Warning] DeepEval evaluation encountered an error: {eval_err}")
 
-        # Locate the newly generated DeepEval result file and enrich with Ops metrics
+        # Locate the newly generated DeepEval result file and enrich with Ops metrics & chunk info
         new_runs = set(results_dir.glob("*.json")) - existing_runs
         target_file = next(iter(new_runs)) if new_runs else None
         if not target_file:
@@ -330,23 +397,57 @@ def run_rag_eval(
                 run_data["token_metrics"] = token_metrics
                 run_data["cost_metrics"] = cost_metrics
                 run_data["per_query_ops"] = per_query_ops
+                # Enrich each testCase with chunk details for proof tracing
+                if "testCases" in run_data:
+                    for tc_idx, tc_item in enumerate(run_data["testCases"]):
+                        if tc_idx < len(per_query_ops):
+                            tc_item["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
                 with open(target_file, "w", encoding="utf-8") as wf:
                     json.dump(run_data, wf, indent=4)
                 print(f"[Ops Attached] Enriched {target_file.name} with latency and cost metrics.")
             except Exception as ex:
                 print(f"[Warning] Could not enrich run file with ops data: {ex}")
 
-        return {
-            "file": target_file.name if target_file else None,
-            "eval_result": eval_result,
-        }
+            return {
+                "file": target_file.name,
+                "eval_result": eval_result,
+            }
+
+        # Fallback if no target file was produced by DeepEval
+        timestamp_slug = int(time.time())
+        summary_file = results_dir / f"test_run_{timestamp_slug}.json"
+        summary_cases = []
+        for tc_idx, tc in enumerate(test_cases):
+            tc_dict = tc.dict()
+            if tc_idx < len(per_query_ops):
+                tc_dict["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
+            summary_cases.append(tc_dict)
+
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "testCases": summary_cases,
+                "hyperparameters": hyperparams,
+                "latency_metrics": latency_metrics,
+                "token_metrics": token_metrics,
+                "cost_metrics": cost_metrics,
+                "per_query_ops": per_query_ops,
+            }, f, indent=4)
+        print(f"[Fallback Saved] Saved run data to: {summary_file.name}")
+        return {"file": summary_file.name, "eval_result": eval_result}
     else:
         print("\nNo DeepEval metrics selected. Saving ops & test case execution summary.")
         timestamp_slug = int(time.time())
         summary_file = results_dir / f"test_run_{timestamp_slug}.json"
+        summary_cases = []
+        for tc_idx, tc in enumerate(test_cases):
+            tc_dict = tc.dict()
+            if tc_idx < len(per_query_ops):
+                tc_dict["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
+            summary_cases.append(tc_dict)
+
         with open(summary_file, "w", encoding="utf-8") as f:
             json.dump({
-                "testCases": [tc.dict() for tc in test_cases],
+                "testCases": summary_cases,
                 "hyperparameters": hyperparams,
                 "latency_metrics": latency_metrics,
                 "token_metrics": token_metrics,
