@@ -11,7 +11,6 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_core.retrievers import BaseRetriever
 from langchain_core.vectorstores import VectorStore, VectorStoreRetriever
 from langchain_qdrant import QdrantVectorStore
 
@@ -167,13 +166,55 @@ def create_qdrant_store(
     return vector_store
 
 
+class ThresholdBM25Retriever(BM25Retriever):
+    """
+    BM25 retriever with score thresholding:
+    - Zero-match floor: drops any document with BM25 score <= 0.0 (zero matching terms).
+    - Relative normalization: norm_score = score / max_score
+      Drops documents with norm_score < score_threshold.
+    - Preserves and enriches Document metadata with 'bm25_score' and 'relevance_score'.
+    """
+    score_threshold: float = 0.0
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
+        processed_query = self.preprocess_func(query)
+        scores = self.vectorizer.get_scores(processed_query)
+
+        positive_indices = [i for i, s in enumerate(scores) if s > 0.0]
+        if not positive_indices:
+            return []
+
+        sorted_indices = sorted(positive_indices, key=lambda i: scores[i], reverse=True)
+        max_score = float(scores[sorted_indices[0]])
+
+        results: list[Document] = []
+        for idx in sorted_indices:
+            raw_score = float(scores[idx])
+            norm_score = raw_score / max_score if max_score > 0 else 0.0
+
+            if self.score_threshold > 0.0 and norm_score < self.score_threshold:
+                continue
+
+            orig_doc = self.docs[idx]
+            doc_meta = dict(orig_doc.metadata) if orig_doc.metadata else {}
+            doc_meta["bm25_score"] = round(raw_score, 4)
+            doc_meta["relevance_score"] = round(norm_score, 4)
+            results.append(Document(page_content=orig_doc.page_content, metadata=doc_meta))
+
+            if len(results) >= self.k:
+                break
+
+        return results
+
+
 def create_bm25_retriever(
     documents: list[Document],
     collection_name: str = "rag_collection",
     persist_directory: Path | str | None = None,
     k: int = 3,
+    score_threshold: float = 0.0,
     **kwargs,
-) -> BM25Retriever:
+) -> ThresholdBM25Retriever:
     """
     Creates an in-memory BM25 sparse keyword retriever and saves it to disk via pickle.
     """
@@ -181,7 +222,8 @@ def create_bm25_retriever(
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / f"{collection_name}.pkl"
 
-    retriever = BM25Retriever.from_documents(documents=documents, k=k, **kwargs)
+    retriever = ThresholdBM25Retriever.from_documents(documents=documents, k=k, **kwargs)
+    retriever.score_threshold = score_threshold
     with open(target_file, "wb") as f:
         pickle.dump(retriever, f)
     return retriever
@@ -374,7 +416,8 @@ def load_bm25_retriever(
     collection_name: str = "rag_collection",
     persist_directory: Path | str | None = None,
     k: int = 3,
-) -> BM25Retriever:
+    score_threshold: float = 0.0,
+) -> ThresholdBM25Retriever:
     """Loads a persisted BM25 retriever index from disk in <2ms."""
     target_dir = Path(persist_directory or BM25_DIR)
     target_file = target_dir / f"{collection_name}.pkl"
@@ -382,7 +425,10 @@ def load_bm25_retriever(
         raise FileNotFoundError(f"BM25 index '{collection_name}' not found in {target_dir}")
     with open(target_file, "rb") as f:
         retriever = pickle.load(f)
+    if not isinstance(retriever, ThresholdBM25Retriever):
+        retriever.__class__ = ThresholdBM25Retriever
     retriever.k = k
+    retriever.score_threshold = score_threshold
     return retriever
 
 
@@ -411,29 +457,37 @@ def get_retriever(
     vector_store: VectorStore,
     k: int = 3,
     search_type: str = "similarity",
+    score_threshold: float | None = None,
+    fetch_k: int | None = None,
+    lambda_mult: float | None = None,
     **kwargs,
 ) -> VectorStoreRetriever:
     """
     Returns a retriever interface from any LangChain VectorStore.
+    Supports search_type:
+    - 'similarity': standard k-NN top-k search
+    - 'similarity_score_threshold': filters chunks where score >= score_threshold
+    - 'mmr': maximal marginal relevance balancing relevance and chunk diversity
     """
+    search_kwargs: dict[str, Any] = {"k": k, **kwargs}
+    if search_type == "similarity_score_threshold" and score_threshold is not None:
+        search_kwargs["score_threshold"] = score_threshold
+    elif search_type == "mmr":
+        search_kwargs["fetch_k"] = fetch_k if fetch_k is not None else max(k * 3, 6)
+        if lambda_mult is not None:
+            search_kwargs["lambda_mult"] = lambda_mult
+
     return vector_store.as_retriever(
         search_type=search_type,
-        search_kwargs={"k": k, **kwargs},
+        search_kwargs=search_kwargs,
     )
-
-
-def retrieve_contexts(retriever: VectorStoreRetriever, query: str) -> list[str]:
-    """
-    Invokes the retriever with a query and returns plain string contexts.
-    """
-    docs = retriever.invoke(query)
-    return [doc.page_content for doc in docs]
 
 
 def main():
     import sys
     sys.path.append(str(ROOT))
     from components.embeddings import get_embeddings
+    from components.retriever import retrieve_contexts
 
     print("""Vector Store Test:
     1. Chroma (databases/chroma)

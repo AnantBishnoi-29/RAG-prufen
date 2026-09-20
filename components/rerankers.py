@@ -1,3 +1,4 @@
+import math
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
@@ -19,16 +20,27 @@ def get_cross_encoder(
     return _MODEL_CACHE[cache_key]
 
 
+def sigmoid(x: float) -> float:
+    """Standard logistic sigmoid function to map unbounded logits to [0.0, 1.0]."""
+    try:
+        return 1.0 / (1.0 + math.exp(-float(x)))
+    except OverflowError:
+        return 0.0 if x < 0 else 1.0
+
+
 def rerank(
     query: str,
     documents: list[Document],
     top_n: int = 3,
+    score_threshold: float | None = None,
     model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     device: str = "cpu",
 ) -> list[Document]:
     """
     Reranks candidate Document objects against a query using a Cross-Encoder.
     Returns the top_n most relevant Document objects with metadata preserved.
+    Attaches 'rerank_score' (raw logit) and 'relevance_score' (sigmoid prob in [0, 1])
+    to document metadata. Filters out candidates below score_threshold if provided.
     """
     if not documents:
         return []
@@ -39,8 +51,21 @@ def rerank(
     pairs = [[query, doc.page_content] for doc in documents]
     scores = model.predict(pairs)
 
+    scored_documents = []
+    for doc, score in zip(documents, scores):
+        raw_score = float(score)
+        prob = sigmoid(raw_score)
+
+        if score_threshold is not None and score_threshold > 0.0 and prob < score_threshold:
+            continue
+
+        doc_meta = dict(doc.metadata) if doc.metadata else {}
+        doc_meta["rerank_score"] = round(raw_score, 4)
+        doc_meta["relevance_score"] = round(prob, 4)
+        scored_documents.append((Document(page_content=doc.page_content, metadata=doc_meta), raw_score))
+
     # Sort documents descending by cross-encoder score
-    scored_documents = sorted(zip(documents, scores), key=lambda x: x[1], reverse=True)
+    scored_documents.sort(key=lambda x: x[1], reverse=True)
 
     return [doc for doc, _ in scored_documents[:top_n]]
 
