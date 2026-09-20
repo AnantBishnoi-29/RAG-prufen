@@ -70,7 +70,6 @@ def run_ops_eval(
     print(f"Top-K Chunks: {top_k}")
     print(f"Generator: {provider} / {model_name} (temperature: {temperature})")
     print(f"Prompt Template: {prompt_template}\n")
-    print(f"\n[Ops Benchmark] Doc: {full_doc_path.name} | Store: {vector_store_type} | Top-K: {top_k}")
 
     # 1. Build live retriever
     print("Initializing vector store and retriever...")
@@ -120,7 +119,7 @@ def run_ops_eval(
         # 3b. Benchmark Generation Latency & Tokens/Cost
         with track_cost() as cost_tracker:
             t1 = time.perf_counter()
-            answer = generate_answer(
+            _ = generate_answer(
                 query=query,
                 contexts=contexts,
                 provider=provider,

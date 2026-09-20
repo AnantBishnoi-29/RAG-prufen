@@ -39,14 +39,13 @@ def run_retriever_eval(
     full_doc_path = ROOT / doc_path if not Path(doc_path).is_absolute() else Path(doc_path)
     full_dataset_path = ROOT / dataset_path if not Path(dataset_path).is_absolute() else Path(dataset_path)
 
-    print(f"\n--- Running Retriever Evaluation ---")
+    print("\n--- Running Retriever Evaluation ---")
     print(f"Document: {full_doc_path.name}")
     print(f"Loader: {loader_type} | Splitter: {splitter_type}")
     print(f"Vector Store: {vector_store_type}")
     print(f"Chunk Size: {chunk_size} (overlap: {chunk_overlap})")
     print(f"Reranker: {'Enabled (cross-encoder)' if use_reranker else 'Disabled'}")
     print(f"Top-K Chunks: {top_k}\n")
-    print(f"\n[Retriever Eval] Doc: {full_doc_path.name} | Store: {vector_store_type} | Top-K: {top_k}")
 
     # 1. Build retriever
     print("Building vector store and retriever...")

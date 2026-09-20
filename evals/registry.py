@@ -4,7 +4,7 @@ Provides a scalable catalog of retriever, generator, operational, and custom met
 Allows dynamic discovery by the API and Web UI.
 """
 
-from typing import Any, Callable
+from typing import Any
 def _make_deepeval_metric(cls_name: str, **kwargs):
     import deepeval.metrics as dm
     cls = getattr(dm, cls_name)

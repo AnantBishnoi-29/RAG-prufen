@@ -219,7 +219,6 @@ def generate_golden_dataset(
 
         effective_sys = system_prompt.strip() if system_prompt and system_prompt.strip() else SYNTHESIS_SYSTEM_PROMPT
         messages = [
-            SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),
             SystemMessage(content=effective_sys),
             HumanMessage(content=prompt_content),
         ]

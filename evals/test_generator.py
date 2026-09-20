@@ -45,7 +45,6 @@ def run_generator_eval(
     print(f"Temperature: {temperature}")
     print(f"Prompt Template: {prompt_template}")
     print("Mode: Isolated Context (Ground Truth)\n")
-    print(f"\n[Generator Eval] Model: {model_name} ({provider}) | Template: {prompt_template}")
 
     # 1. Load dataset
     with open(full_dataset_path, encoding="utf-8") as f:
