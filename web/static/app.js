@@ -17,6 +17,9 @@ function initApp() {
   const playStoreSelect = document.getElementById("play-store");
   const playTopkRange = document.getElementById("play-topk");
   const playTopkVal = document.getElementById("topk-val");
+  const playThresholdRange = document.getElementById("play-threshold");
+  const playThresholdVal = document.getElementById("play-threshold-val");
+  const playSearchTypeSelect = document.getElementById("play-search-type");
   const playProviderSelect = document.getElementById("play-provider");
   const playModelInput = document.getElementById("play-model");
   const playPromptSelect = document.getElementById("play-prompt");
@@ -55,6 +58,11 @@ function initApp() {
   const evalStoreSelect = document.getElementById("eval-store");
   const evalCasesRange = document.getElementById("eval-cases");
   const evalCasesVal = document.getElementById("eval-cases-val");
+  const evalTopkRange = document.getElementById("eval-topk");
+  const evalTopkVal = document.getElementById("eval-topk-val");
+  const evalSearchTypeSelect = document.getElementById("eval-search-type");
+  const evalThresholdRange = document.getElementById("eval-threshold");
+  const evalThresholdVal = document.getElementById("eval-threshold-val");
   const evalHybridCheck = document.getElementById("eval-hybrid");
   const evalRerankCheck = document.getElementById("eval-rerank");
   const evalProviderSelect = document.getElementById("eval-provider");
@@ -120,6 +128,11 @@ function initApp() {
       user: "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
     }
   };
+  const defaultProviderModels = {
+    openai: "gpt-4o-mini",
+    deepseek: "deepseek-chat",
+    ollama: "llama3"
+  };
   let defaultSynthesisPrompt = "";
 
   // --- Tab Titles & Descriptions ---
@@ -164,6 +177,26 @@ function initApp() {
   if (playTopkRange && playTopkVal) {
     playTopkRange.addEventListener("input", (e) => {
       playTopkVal.textContent = e.target.value;
+    });
+  }
+
+  if (playThresholdRange && playThresholdVal) {
+    playThresholdRange.addEventListener("input", (e) => {
+      const val = parseFloat(e.target.value);
+      playThresholdVal.textContent = val === 0 ? "0.00 (Off)" : val.toFixed(2);
+    });
+  }
+
+  if (evalTopkRange && evalTopkVal) {
+    evalTopkRange.addEventListener("input", (e) => {
+      evalTopkVal.textContent = e.target.value;
+    });
+  }
+
+  if (evalThresholdRange && evalThresholdVal) {
+    evalThresholdRange.addEventListener("input", (e) => {
+      const val = parseFloat(e.target.value);
+      evalThresholdVal.textContent = val === 0 ? "0.00 (Off)" : val.toFixed(2);
     });
   }
 
@@ -418,11 +451,6 @@ function initApp() {
   // =========================================================================
   // 2. Playground: Live Query
   // =========================================================================
-  const defaultProviderModels = {
-    openai: "gpt-4o-mini",
-    deepseek: "deepseek-chat",
-    ollama: "llama3"
-  };
 
   if (playProviderSelect && playModelInput) {
     playProviderSelect.addEventListener("change", (e) => {
@@ -463,6 +491,8 @@ function initApp() {
       chunk_size: playChunkSize ? (parseInt(playChunkSize.value, 10) || 500) : 500,
       chunk_overlap: playChunkOverlap ? (parseInt(playChunkOverlap.value, 10) || 100) : 100,
       top_k: parseInt(playTopkRange.value, 10),
+      search_type: playSearchTypeSelect ? playSearchTypeSelect.value : "similarity",
+      score_threshold: playThresholdRange ? (parseFloat(playThresholdRange.value) || 0.0) : 0.0,
       provider: playProviderSelect.value,
       model_name: playModelInput.value.trim() || "gpt-4o-mini",
       prompt_template: playPromptSelect.value,
@@ -503,10 +533,13 @@ function initApp() {
           const card = document.createElement("div");
           card.className = "chunk-card";
           const pageStr = chunk.page !== null && chunk.page !== undefined ? `Page ${chunk.page + 1}` : "Page N/A";
+          const pageBadge = chunk.page ? `<span class="badge" style="background: rgba(88,166,255,0.15); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); font-weight: 600; padding: 2px 6px; border-radius: 4px;">📄 Page ${chunk.page}</span>` : `<span class="badge" style="opacity: 0.6;">Page N/A</span>`;
+          const sourceBadge = chunk.source ? `<span style="font-size: 11px; opacity: 0.7; margin-left: 6px;">${escapeHtml(chunk.source)}</span>` : "";
+          const scoreBadge = chunk.score !== null && chunk.score !== undefined ? `<span style="font-size: 11px; color: #3fb950; margin-right: 6px;">Score: ${chunk.score}</span>` : "";
           card.innerHTML = `
             <div class="chunk-header">
-              <span>Chunk #${i + 1} (${chunk.chars} chars)</span>
-              <span>${pageStr}</span>
+              <div><span>Chunk #${i + 1} (${chunk.chars} chars)</span>${sourceBadge}</div>
+              <div style="display: flex; align-items: center;">${scoreBadge}${pageBadge}</div>
             </div>
             <div class="chunk-body">${escapeHtml(chunk.content)}</div>
           `;
@@ -753,15 +786,14 @@ function initApp() {
         embedding_provider: evalEmbeddings ? evalEmbeddings.value : "openai",
         chunk_size: evalChunkSize ? (parseInt(evalChunkSize.value, 10) || 500) : 500,
         chunk_overlap: evalChunkOverlap ? (parseInt(evalChunkOverlap.value, 10) || 100) : 100,
-        top_k: 3,
+        top_k: evalTopkRange ? (parseInt(evalTopkRange.value, 10) || 3) : 3,
+        search_type: evalSearchTypeSelect ? evalSearchTypeSelect.value : "similarity",
+        score_threshold: evalThresholdRange ? (parseFloat(evalThresholdRange.value) || 0.0) : 0.0,
         use_reranker: evalRerankCheck ? evalRerankCheck.checked : false,
         use_hybrid: evalHybridCheck ? evalHybridCheck.checked : false,
-        provider: "openai",
-        model_name: "gpt-4o-mini",
         provider: evalProviderSelect ? evalProviderSelect.value : "openai",
         model_name: evalModelInput && evalModelInput.value.trim() ? evalModelInput.value.trim() : "gpt-4o-mini",
         temperature: 0.0,
-        prompt_template: "default",
         prompt_template: evalPromptSelect ? evalPromptSelect.value : "default",
         system_prompt: evalSystemPrompt && evalSystemPrompt.value.trim() ? evalSystemPrompt.value.trim() : undefined,
         eval_model: "gpt-4o-mini",
@@ -1014,16 +1046,35 @@ function initApp() {
     const expected = tc.expectedOutput || "N/A";
 
     let contextHtml = "";
-    const ctxList = tc.retrievalContext || tc.retrieval_context || tc.context || [];
-    if (ctxList.length > 0) {
-      contextHtml = ctxList.map((c, i) => `
-        <div class="chunk-card" style="margin-bottom: 8px;">
-          <div class="chunk-header"><span>Context #${i + 1}</span></div>
-          <div class="chunk-body">${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</div>
-        </div>
-      `).join("");
+    const chunksInfo = tc.retrieval_chunks_info || tc.chunks || null;
+    if (chunksInfo && Array.isArray(chunksInfo) && chunksInfo.length > 0) {
+      contextHtml = chunksInfo.map((c, i) => {
+        const pageBadge = c.page ? `<span class="badge" style="background: rgba(88,166,255,0.15); color: #58a6ff; border: 1px solid rgba(88,166,255,0.3); font-weight: 600; padding: 2px 6px; border-radius: 4px;">📄 Page ${c.page}</span>` : `<span class="badge" style="opacity: 0.6;">Page N/A</span>`;
+        const sourceBadge = c.source ? `<span style="font-size: 11px; opacity: 0.7; margin-left: 6px;">${escapeHtml(c.source)}</span>` : "";
+        const scoreBadge = c.score !== null && c.score !== undefined ? `<span style="font-size: 11px; color: #3fb950; margin-right: 6px;">Score: ${c.score}</span>` : "";
+        return `
+          <div class="chunk-card" style="margin-bottom: 8px;">
+            <div class="chunk-header">
+              <div><span>Context #${c.index || (i + 1)}</span>${sourceBadge}</div>
+              <div style="display: flex; align-items: center;">${scoreBadge}${pageBadge}</div>
+            </div>
+            <div class="chunk-body">${escapeHtml(typeof c.content === 'string' ? c.content : JSON.stringify(c.content))}</div>
+          </div>
+        `;
+      }).join("");
     } else {
       contextHtml = "<div class='placeholder-text'>No context chunks available.</div>";
+      const ctxList = tc.retrievalContext || tc.retrieval_context || tc.context || [];
+      if (ctxList.length > 0) {
+        contextHtml = ctxList.map((c, i) => `
+          <div class="chunk-card" style="margin-bottom: 8px;">
+            <div class="chunk-header"><span>Context #${i + 1}</span> <span class="badge" style="opacity: 0.6;">Page N/A</span></div>
+            <div class="chunk-body">${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</div>
+          </div>
+        `).join("");
+      } else {
+        contextHtml = "<div class='placeholder-text'>No context chunks available.</div>";
+      }
     }
 
     let metricsHtml = "";

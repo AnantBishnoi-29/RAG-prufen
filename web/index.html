@@ -125,6 +125,22 @@
               </div>
 
               <div class="form-group">
+                <label for="play-threshold">Relevance Threshold (<span id="play-threshold-val">0.00 (Off)</span>)</label>
+                <input type="range" id="play-threshold" min="0" max="1" step="0.05" value="0" class="input-range" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="play-search-type">Search Type</label>
+                <select id="play-search-type" class="input-select">
+                  <option value="similarity" selected>Similarity (Standard k-NN)</option>
+                  <option value="similarity_score_threshold">Similarity Score Threshold</option>
+                  <option value="mmr">MMR (Max Marginal Relevance)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
                 <label for="play-provider">LLM Provider</label>
                 <select id="play-provider" class="input-select">
                   <option value="openai" selected>OpenAI</option>
@@ -337,6 +353,29 @@
               <input type="range" id="eval-cases" min="1" max="10" value="2" class="input-range" />
             </div>
 
+            <div class="form-group">
+              <label for="eval-topk">Top-K Chunks (<span id="eval-topk-val">3</span>)</label>
+              <input type="range" id="eval-topk" min="1" max="10" value="3" class="input-range" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="eval-search-type">Search Type</label>
+              <select id="eval-search-type" class="input-select">
+                <option value="similarity" selected>Similarity (Standard k-NN)</option>
+                <option value="similarity_score_threshold">Similarity Score Threshold</option>
+                <option value="mmr">MMR (Max Marginal Relevance)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="eval-threshold">Relevance Threshold (<span id="eval-threshold-val">0.00 (Off)</span>)</label>
+              <input type="range" id="eval-threshold" min="0" max="1" step="0.05" value="0" class="input-range" />
+            </div>
+          </div>
+
+          <div class="form-row">
             <div class="form-group">
               <label for="eval-provider">LLM Provider</label>
               <select id="eval-provider" class="input-select">
@@ -578,8 +617,7 @@
       <div id="modal-body" class="modal-body"></div>
     </div>
   </div>
-
-  <script src="/static/app.js?v=28"></script>
+  <script src="/static/app.js?v=36"></script>
 </body>
 </html>
 
