@@ -8,14 +8,12 @@ import json
 from pathlib import Path
 import sys
 import time
-from typing import Any
-
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # Ensure UTF-8 output encoding for Windows consoles
 if sys.platform == "win32":
@@ -27,8 +25,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from components.generator import generate_answer
-from components.retriever import build_retriever, retrieve, retrieve_contexts
+from components.retriever import build_retriever, retrieve
+from evals.registry import get_metrics_catalog
 from evals.scripts.generate_goldens import generate_golden_dataset
+from evals.test_rag import run_rag_eval
 from prompts import SYNTHESIS_SYSTEM_PROMPT, get_all_qa_presets
 
 load_dotenv()
@@ -224,6 +224,8 @@ class QueryRequest(BaseModel):
     loader_type: str = "auto"
     splitter_type: str = "recursive"
     top_k: int = 3
+    search_type: str = "similarity"
+    score_threshold: float = 0.0
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     prompt_template: str = "default"
@@ -238,8 +240,8 @@ def run_playground_query(req: QueryRequest):
     """
     Executes a live query through the decoupled RAG pipeline:
     1. Builds retriever for selected document & vector store (supports dense, BM25, and hybrid)
-    2. Retrieves top-k chunks (with optional cross-encoder reranker)
-    3. Generates grounded answer via LLM
+    2. Retrieves top-k chunks (with optional cross-encoder reranker & thresholding)
+    3. Generates grounded answer via LLM (bypasses LLM if 0 chunks meet threshold)
     4. Measures and returns retrieval, generation, and total latency
     """
     if req.chunk_overlap >= req.chunk_size:
@@ -269,6 +271,8 @@ def run_playground_query(req: QueryRequest):
             vector_store_type=req.vector_store,
             k=req.top_k,
             use_hybrid=req.use_hybrid,
+            search_type=req.search_type,
+            score_threshold=req.score_threshold,
         )
 
         retrieved_docs = retrieve(
@@ -276,48 +280,60 @@ def run_playground_query(req: QueryRequest):
             query=clean_query,
             use_reranker=req.use_reranker,
             top_k=req.top_k,
+            score_threshold=req.score_threshold,
         )
         retrieved_texts = [doc.page_content for doc in retrieved_docs]
         t1 = time.perf_counter()
 
-        # Phase 2: Generation
-        answer = generate_answer(
-            query=clean_query,
-            contexts=retrieved_texts,
-            provider=req.provider,
-            model_name=req.model_name,
-            temperature=req.temperature,
-            prompt_template=req.prompt_template,
-            system_prompt=req.system_prompt,
-        )
-        t2 = time.perf_counter()
+        # Phase 2: Generation (bypasses LLM call if no chunks qualify)
+        if not retrieved_texts:
+            answer = "No relevant context found in document matching the specified criteria / threshold."
+            t2 = t1
+            retrieval_ms = (t1 - t0) * 1000.0
+            generation_ms = 0.0
+            total_ms = retrieval_ms
+        else:
+            answer = generate_answer(
+                query=clean_query,
+                contexts=retrieved_texts,
+                provider=req.provider,
+                model_name=req.model_name,
+                temperature=req.temperature,
+                prompt_template=req.prompt_template,
+                system_prompt=req.system_prompt,
+            )
+            t2 = time.perf_counter()
+            retrieval_ms = (t1 - t0) * 1000.0
+            generation_ms = (t2 - t1) * 1000.0
+            total_ms = (t2 - t0) * 1000.0
 
-        retrieval_ms = (t1 - t0) * 1000.0
-        generation_ms = (t2 - t1) * 1000.0
-        total_ms = (t2 - t0) * 1000.0
-
-        def _extract_page(meta: dict | None) -> int | None:
+        def _extract_page_info(meta: dict | None) -> tuple[int | None, str]:
             if not meta:
-                return None
+                return None, ""
+            source = Path(meta.get("source", "")).name if meta.get("source") else ""
             val = meta.get("page") if "page" in meta else meta.get("page_number")
             if val is not None:
                 try:
-                    return int(val)
+                    return int(val) + 1, source
                 except (ValueError, TypeError):
-                    return None
-            return None
+                    pass
+            return None, source
 
-        # Structure chunks for UI display with preserved metadata and page numbers
-        formatted_chunks = [
-            {
+        # Structure chunks for UI display with preserved metadata, score, and 1-indexed page numbers
+        formatted_chunks = []
+        for i, doc in enumerate(retrieved_docs):
+            page_num, src = _extract_page_info(doc.metadata if hasattr(doc, "metadata") else None)
+            meta = doc.metadata if hasattr(doc, "metadata") and doc.metadata else {}
+            score = meta.get("relevance_score") or meta.get("rerank_prob") or meta.get("bm25_score")
+            formatted_chunks.append({
                 "index": i + 1,
                 "content": doc.page_content,
                 "chars": len(doc.page_content),
-                "page": _extract_page(doc.metadata if hasattr(doc, "metadata") else None),
-                "metadata": doc.metadata if hasattr(doc, "metadata") and doc.metadata else {},
-            }
-            for i, doc in enumerate(retrieved_docs)
-        ]
+                "page": page_num,
+                "source": src,
+                "score": score,
+                "metadata": meta,
+            })
 
         return {
             "query": clean_query,
@@ -328,6 +344,8 @@ def run_playground_query(req: QueryRequest):
             "total_latency_ms": total_ms,
             "metadata": {
                 "vector_store": req.vector_store,
+                "search_type": req.search_type,
+                "score_threshold": req.score_threshold,
                 "embedding_provider": req.embedding_provider,
                 "loader_type": req.loader_type,
                 "splitter_type": req.splitter_type,
@@ -392,8 +410,6 @@ def trigger_golden_generation(req: GoldenGenRequest):
 # ---------------------------------------------------------------------------
 # API: Metric Registry & Selective Evaluation
 # ---------------------------------------------------------------------------
-from evals.registry import get_metrics_catalog
-from evals.test_rag import run_rag_eval
 
 
 @app.get("/api/evaluate/metrics")
@@ -414,6 +430,8 @@ class EvalRunRequest(BaseModel):
     use_reranker: bool = False
     use_hybrid: bool = False
     top_k: int = 3
+    search_type: str = "similarity"
+    score_threshold: float = 0.0
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     temperature: float = 0.0
@@ -455,6 +473,8 @@ def trigger_eval_run(req: EvalRunRequest):
             use_reranker=req.use_reranker,
             use_hybrid=req.use_hybrid,
             top_k=req.top_k,
+            search_type=req.search_type,
+            score_threshold=req.score_threshold,
             provider=req.provider,
             model_name=req.model_name,
             temperature=req.temperature,
@@ -484,5 +504,5 @@ if __name__ == "__main__":
     print("\n" + "=" * 55)
     print("   ⚡ Starting RAG Eval Suite Dashboard at http://127.0.0.1:8000")
     print("=" * 55 + "\n")
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
 
