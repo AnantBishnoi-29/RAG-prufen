@@ -86,7 +86,7 @@ def run_rag_eval(
     full_dataset_path = ROOT / dataset_path if not Path(dataset_path).is_absolute() else Path(dataset_path)
 
     # 1. Build metrics from registry
-    deepeval_metrics, active_ops = build_selected_metrics(
+    deepeval_metrics, _ = build_selected_metrics(
         selected_ids=selected_metrics,
         eval_model=eval_model,
     )
@@ -98,9 +98,10 @@ def run_rag_eval(
         "HallucinationMetric",
         "ToxicityMetric",
         "BiasMetric",
+        "GEval",
     }
     has_generator_metrics = any(m.__class__.__name__ in generator_metric_names for m in deepeval_metrics)
-    needs_generation = (scope != "retriever_only") and has_generator_metrics
+    needs_generation = (scope != "retriever_only") and (has_generator_metrics or scope in ("all", "generator_only"))
 
     # 2. Build retriever (needed for all and retriever_only)
     retriever = None
@@ -130,7 +131,6 @@ def run_rag_eval(
 
     # 4. Execute pipeline per test case
     test_cases: list[LLMTestCase] = []
-    print(f"Processing {len(goldens)} test cases...")
     per_query_ops = []
     retrieval_latencies = []
     generation_latencies = []
@@ -144,11 +144,11 @@ def run_rag_eval(
     print(f"Processing {len(goldens)} test cases with live ops tracking...")
 
     for i, item in enumerate(goldens, 1):
-        query = item["input"]
+        query = item.get("input") or item.get("question") or item.get("query") or ""
         expected_output = item.get("expected_output")
 
         # Ground truth context from dataset
-        golden_context = item.get("context", [])
+        golden_context = item.get("context") or item.get("contexts") or []
         if isinstance(golden_context, str):
             golden_context = [golden_context]
 
@@ -171,7 +171,6 @@ def run_rag_eval(
         retrieval_ms = round(retrieval_sec * 1000, 2)
         retrieval_latencies.append(retrieval_ms)
 
-        # Step B: Generation (conditionally skipped if retriever_only)
         # Structure chunk info for proof tracing & source/page verification
         chunks_info = []
         for idx_c, d in enumerate(retrieved_docs):
@@ -190,7 +189,7 @@ def run_rag_eval(
                 "chars": len(d.page_content),
                 "page": page_num,
                 "source": source_file,
-                "score": meta.get("relevance_score") or meta.get("rerank_prob") or meta.get("bm25_score"),
+                "score": next((meta[k] for k in ("relevance_score", "rerank_prob", "bm25_score") if meta.get(k) is not None), None),
             })
 
         # Step B: Generation (conditionally skipped if retriever_only or if no chunks pass threshold)
@@ -260,7 +259,7 @@ def run_rag_eval(
                 retrieval_context=retrieved_chunks,
             )
         )
-      
+
     # 5. Compute Aggregated Ops & Latency Metrics
     n_queries = len(goldens)
     avg_cost_per_query = grand_total_cost / n_queries if n_queries else 0.0
@@ -298,15 +297,15 @@ def run_rag_eval(
         "avg_throughput_tokens_per_sec": round(statistics.mean(all_throughputs), 2) if all_throughputs else 0.0,
         "prompt_tokens": {
             "total": total_prompt_tokens,
-            "mean_per_query": round(total_prompt_tokens / n_queries, 1) if n_queries else 0,
+            "mean_per_query": round(total_prompt_tokens / n_queries, 1) if n_queries else 0.0,
         },
         "completion_tokens": {
             "total": total_completion_tokens,
-            "mean_per_query": round(total_completion_tokens / n_queries, 1) if n_queries else 0,
+            "mean_per_query": round(total_completion_tokens / n_queries, 1) if n_queries else 0.0,
         },
         "total_tokens": {
             "total": grand_total_tokens,
-            "mean_per_query": round(grand_total_tokens / n_queries, 1) if n_queries else 0,
+            "mean_per_query": round(grand_total_tokens / n_queries, 1) if n_queries else 0.0,
         },
         "throughput_tokens_per_sec": {
             "mean": round(statistics.mean(all_throughputs), 2) if all_throughputs else 0.0,
@@ -366,9 +365,9 @@ def run_rag_eval(
         max_concurrent=5,
     )
 
+    eval_result = None
     if deepeval_metrics:
         print("\nEvaluating with DeepEval...")
-        eval_result = None
         try:
             eval_result = evaluate(
                 test_cases=test_cases,
@@ -383,10 +382,7 @@ def run_rag_eval(
 
         # Locate the newly generated DeepEval result file and enrich with Ops metrics & chunk info
         new_runs = set(results_dir.glob("*.json")) - existing_runs
-        target_file = next(iter(new_runs)) if new_runs else None
-        if not target_file:
-            all_runs = sorted(results_dir.glob("test_run_*.json"), key=lambda x: x.stat().st_mtime, reverse=True)
-            target_file = all_runs[0] if all_runs else None
+        target_file = max(new_runs, key=lambda p: p.stat().st_mtime) if new_runs else None
 
         if target_file and target_file.exists():
             try:
@@ -399,8 +395,12 @@ def run_rag_eval(
                 run_data["per_query_ops"] = per_query_ops
                 # Enrich each testCase with chunk details for proof tracing
                 if "testCases" in run_data:
+                    query_chunks_map = {op.get("query", ""): op.get("retrieval_chunks_info", []) for op in per_query_ops}
                     for tc_idx, tc_item in enumerate(run_data["testCases"]):
-                        if tc_idx < len(per_query_ops):
+                        inp = tc_item.get("input", "")
+                        if inp in query_chunks_map:
+                            tc_item["retrieval_chunks_info"] = query_chunks_map[inp]
+                        elif tc_idx < len(per_query_ops):
                             tc_item["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
                 with open(target_file, "w", encoding="utf-8") as wf:
                     json.dump(run_data, wf, indent=4)
@@ -413,49 +413,33 @@ def run_rag_eval(
                 "eval_result": eval_result,
             }
 
-        # Fallback if no target file was produced by DeepEval
-        timestamp_slug = int(time.time())
-        summary_file = results_dir / f"test_run_{timestamp_slug}.json"
-        summary_cases = []
-        for tc_idx, tc in enumerate(test_cases):
-            tc_dict = tc.dict()
-            if tc_idx < len(per_query_ops):
-                tc_dict["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
-            summary_cases.append(tc_dict)
-
-        with open(summary_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "testCases": summary_cases,
-                "hyperparameters": hyperparams,
-                "latency_metrics": latency_metrics,
-                "token_metrics": token_metrics,
-                "cost_metrics": cost_metrics,
-                "per_query_ops": per_query_ops,
-            }, f, indent=4)
-        print(f"[Fallback Saved] Saved run data to: {summary_file.name}")
-        return {"file": summary_file.name, "eval_result": eval_result}
-    else:
+    # Fallback if no target file was produced by DeepEval, or if no DeepEval metrics were selected
+    if not deepeval_metrics:
         print("\nNo DeepEval metrics selected. Saving ops & test case execution summary.")
-        timestamp_slug = int(time.time())
-        summary_file = results_dir / f"test_run_{timestamp_slug}.json"
-        summary_cases = []
-        for tc_idx, tc in enumerate(test_cases):
-            tc_dict = tc.dict()
-            if tc_idx < len(per_query_ops):
-                tc_dict["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
-            summary_cases.append(tc_dict)
+    label = "[Fallback Saved]" if deepeval_metrics else "[Export Complete]"
+    timestamp_slug = int(time.time() * 1000)
+    summary_file = results_dir / f"test_run_{timestamp_slug}.json"
+    summary_cases = []
+    for tc_idx, tc in enumerate(test_cases):
+        tc_dict = tc.model_dump() if hasattr(tc, "model_dump") else tc.dict()
+        if tc_idx < len(per_query_ops):
+            tc_dict["retrieval_chunks_info"] = per_query_ops[tc_idx].get("retrieval_chunks_info", [])
+        summary_cases.append(tc_dict)
 
-        with open(summary_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "testCases": summary_cases,
-                "hyperparameters": hyperparams,
-                "latency_metrics": latency_metrics,
-                "token_metrics": token_metrics,
-                "cost_metrics": cost_metrics,
-                "per_query_ops": per_query_ops,
-            }, f, indent=4)
-        print(f"[Export Complete] Saved run to: {summary_file.name}")
-        return {"file": summary_file.name}
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "testCases": summary_cases,
+            "hyperparameters": hyperparams,
+            "latency_metrics": latency_metrics,
+            "token_metrics": token_metrics,
+            "cost_metrics": cost_metrics,
+            "per_query_ops": per_query_ops,
+        }, f, indent=4)
+    print(f"{label} Saved run to: {summary_file.name}")
+    return {
+        "file": summary_file.name,
+        "eval_result": eval_result if deepeval_metrics else None,
+    }
 
 
 if __name__ == "__main__":

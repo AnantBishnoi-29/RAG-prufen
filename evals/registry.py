@@ -5,7 +5,10 @@ Allows dynamic discovery by the API and Web UI.
 """
 
 from typing import Any
-def _make_deepeval_metric(cls_name: str, **kwargs):
+
+
+def _make_deepeval_metric(cls_name: str, **kwargs: Any) -> Any:
+    """Lazy-imports and instantiates a DeepEval metric class by name."""
     import deepeval.metrics as dm
     cls = getattr(dm, cls_name)
     return cls(**kwargs)
@@ -106,20 +109,20 @@ METRIC_REGISTRY: dict[str, dict[str, Any]] = {
 
 def get_metrics_catalog() -> list[dict[str, Any]]:
     """
-    Returns a lightweight catalog of all registered metrics grouped for UI and API consumption.
+    Returns a lightweight catalog of all registered metrics with metadata for UI and API consumption.
     Omits Python callables/factories so the result is 100% JSON serializable.
     """
-    catalog = []
-    for metric_id, info in METRIC_REGISTRY.items():
-        catalog.append({
+    return [
+        {
             "id": info["id"],
             "name": info["name"],
             "category": info["category"],
             "category_label": info["category_label"],
             "description": info["description"],
             "default_checked": info["default_checked"],
-        })
-    return catalog
+        }
+        for info in METRIC_REGISTRY.values()
+    ]
 
 
 def build_selected_metrics(
@@ -128,19 +131,26 @@ def build_selected_metrics(
 ) -> tuple[list[Any], set[str]]:
     """
     Builds and instantiates selected DeepEval metrics and returns active ops flags.
+
+    Args:
+        selected_ids: Metric IDs to instantiate. If None, defaults to metrics with default_checked=True.
+        eval_model: LLM model name passed to DeepEval metric evaluators.
+
     Returns:
         (deepeval_metrics, active_ops_metric_ids)
     """
     if selected_ids is None:
-        selected_ids = list(METRIC_REGISTRY.keys())
+        selected_ids = [k for k, v in METRIC_REGISTRY.items() if v.get("default_checked", True)]
 
     deepeval_metrics = []
-    active_ops = set()
+    active_ops: set[str] = set()
+    seen: set[str] = set()
 
     for metric_id in selected_ids:
-        clean_id = metric_id.lower().strip()
-        if clean_id not in METRIC_REGISTRY:
+        clean_id = str(metric_id).lower().strip()
+        if clean_id not in METRIC_REGISTRY or clean_id in seen:
             continue
+        seen.add(clean_id)
 
         info = METRIC_REGISTRY[clean_id]
         if info["category"] == "ops":

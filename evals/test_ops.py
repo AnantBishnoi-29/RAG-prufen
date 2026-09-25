@@ -24,6 +24,7 @@ def calculate_percentile(data: list[float], p: float) -> float:
     """Calculates the p-th percentile of a list of floats (0 to 100)."""
     if not data:
         return 0.0
+    p = max(0.0, min(100.0, p))
     sorted_data = sorted(data)
     k = (len(sorted_data) - 1) * (p / 100.0)
     f = int(k)
@@ -92,9 +93,9 @@ def run_ops_eval(
     with open(full_dataset_path, encoding="utf-8") as f:
         goldens = json.load(f)
 
-    if max_cases:
-        goldens = goldens[:max_cases]
-        print(f"Benchmarking with {max_cases} queries.\n")
+    if max_cases is not None:
+        goldens = goldens[:max(0, max_cases)]
+        print(f"Benchmarking with {len(goldens)} queries (limit: {max_cases}).\n")
 
     per_query_results = []
 
@@ -103,7 +104,7 @@ def run_ops_eval(
 
     # 3. Benchmark per query
     for i, item in enumerate(goldens, 1):
-        query = item["input"]
+        query = item.get("input") or item.get("question") or item.get("query") or ""
 
         # 3a. Benchmark Retrieval Latency
         t0 = time.perf_counter()
@@ -178,6 +179,9 @@ def run_ops_eval(
     avg_cost_per_query = (grand_total_cost / n_queries) if n_queries else 0.0
     projected_cost_1k = avg_cost_per_query * 1000
 
+    total_gen_sec = sum(r["generation_ms"] for r in per_query_results) / 1000.0
+    aggregate_throughput = round(total_completion_tokens / total_gen_sec, 2) if total_gen_sec > 0 else 0.0
+
     summary = {
         "timestamp": datetime.now().isoformat(),
         "hyperparameters": {
@@ -199,6 +203,7 @@ def run_ops_eval(
             "total_queries_benchmarked": n_queries,
         },
         "latency_metrics": {
+            "retriever_init_ms": init_retriever_ms,
             "retrieval_ms": {
                 "mean": round(statistics.mean(retrieval_latencies), 2) if retrieval_latencies else 0.0,
                 "p50": calculate_percentile(retrieval_latencies, 50),
@@ -227,6 +232,7 @@ def run_ops_eval(
             "grand_total_tokens": grand_total_tokens,
             "avg_tokens_per_query": round(grand_total_tokens / n_queries, 1) if n_queries else 0.0,
             "avg_throughput_tokens_per_sec": round(statistics.mean(all_throughputs), 2) if all_throughputs else 0.0,
+            "aggregate_throughput_tokens_per_sec": aggregate_throughput,
         },
         "cost_metrics": {
             "total_cost_usd": round(grand_total_cost, 6),
@@ -262,7 +268,7 @@ def run_ops_eval(
     )
     print("-" * 80)
     print(f"Total Tokens: {grand_total_tokens:,} (Prompt: {total_prompt_tokens:,}, Completion: {total_completion_tokens:,})")
-    print(f"Average Generation Throughput: {summary['token_metrics']['avg_throughput_tokens_per_sec']} tokens/sec")
+    print(f"Average Generation Throughput: {summary['token_metrics']['avg_throughput_tokens_per_sec']:.2f} tokens/sec (Aggregate: {aggregate_throughput:.2f} tok/s)")
     print(f"Total Cost: ${grand_total_cost:.6f} USD (Avg: ${avg_cost_per_query:.6f} / query)")
     print(f"Projected Cost per 1,000 Queries: ${projected_cost_1k:.4f} USD")
     print("=" * 80)

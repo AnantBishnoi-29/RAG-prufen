@@ -1,11 +1,14 @@
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 # Ensure UTF-8 output encoding for Windows consoles
 if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
 
 # Ensure project root is in sys.path
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,13 +34,18 @@ def run_retriever_eval(
     use_reranker: bool = False,
     top_k: int = 3,
     eval_model: str = "gpt-4o-mini",
-):
+) -> Any:
     """
     Evaluates Retriever Contextual Recall and Contextual Precision
     without calling the LLM generator.
     """
-    full_doc_path = ROOT / doc_path if not Path(doc_path).is_absolute() else Path(doc_path)
-    full_dataset_path = ROOT / dataset_path if not Path(dataset_path).is_absolute() else Path(dataset_path)
+    doc_p = Path(doc_path)
+    full_doc_path = doc_p if doc_p.is_absolute() else ROOT / doc_p
+    dataset_p = Path(dataset_path)
+    full_dataset_path = dataset_p if dataset_p.is_absolute() else ROOT / dataset_p
+
+    if not full_dataset_path.exists():
+        raise FileNotFoundError(f"Golden dataset not found at: {full_dataset_path}")
 
     print("\n--- Running Retriever Evaluation ---")
     print(f"Document: {full_doc_path.name}")
@@ -63,26 +71,39 @@ def run_retriever_eval(
     with open(full_dataset_path, encoding="utf-8") as f:
         goldens = json.load(f)
 
+    if not goldens:
+        print("Warning: No test cases found to evaluate.")
+        return None
+
     test_cases = []
 
     # 3. Retrieve context for each golden question
     print(f"Retrieving contexts for {len(goldens)} test cases...")
     for item in goldens:
+        query = item.get("input") or item.get("question") or item.get("query")
+        if not query:
+            continue
+        expected = item.get("expected_output") or item.get("ground_truth")
+
         contexts = retrieve_contexts(
             retriever=retriever,
-            query=item["input"],
+            query=query,
             use_reranker=use_reranker,
             top_k=top_k,
         )
 
         test_cases.append(
             LLMTestCase(
-                input=item["input"],
+                input=query,
                 actual_output="N/A",  # Not required for retriever evaluation
-                expected_output=item["expected_output"],
+                expected_output=expected,
                 retrieval_context=contexts,
             )
         )
+
+    if not test_cases:
+        print("Warning: No valid test cases created.")
+        return None
 
     # 4. Metrics: Contextual Recall & Contextual Precision
     metrics = [
@@ -94,6 +115,8 @@ def run_retriever_eval(
     results_dir.mkdir(parents=True, exist_ok=True)
 
     hyperparams = {
+        "document": full_doc_path.name,
+        "eval_model": eval_model,
         "vector_store": vector_store_type,
         "loader_type": str(loader_type),
         "splitter_type": splitter_type,
@@ -119,4 +142,3 @@ def run_retriever_eval(
 
 if __name__ == "__main__":
     run_retriever_eval()
-
